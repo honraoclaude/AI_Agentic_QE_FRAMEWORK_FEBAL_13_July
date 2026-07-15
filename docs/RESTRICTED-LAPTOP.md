@@ -57,7 +57,20 @@ tracked file with the correct folder structure in one action.
 
 ---
 
-## Step 2 — Backend
+## Steps 2–3 — One-shot (recommended)
+
+From the repo root, run the bundled bootstrap script. It checks for Python/npm,
+creates the backend venv, installs backend + frontend dependencies, and seeds
+`backend\.env` (in demo mode) if it's missing. Safe to re-run.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+Then skip to [Step 4](#step-4--configure-credentials). Prefer to do it by hand?
+Use the manual steps below instead.
+
+### Step 2 (manual) — Backend
 
 ```powershell
 cd backend
@@ -66,7 +79,7 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-## Step 3 — Frontend
+### Step 3 (manual) — Frontend
 
 ```powershell
 cd ..\frontend
