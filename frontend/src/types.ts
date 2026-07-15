@@ -1,0 +1,236 @@
+// Mirrors backend/app/schemas — keep in sync by hand for v1.
+
+export type Phase = "REFINEMENT" | "DEVELOPMENT" | "TESTING" | "RELEASE";
+export const PHASES: Phase[] = ["REFINEMENT", "DEVELOPMENT", "TESTING", "RELEASE"];
+
+export const ROLES = [
+  "Product Owner",
+  "Tech Lead",
+  "QE Lead",
+  "Business Stakeholder",
+  "Compliance Officer",
+] as const;
+export type Role = (typeof ROLES)[number];
+
+export type WorkKind =
+  | "GATE_SIGNOFF"
+  | "RUN_APPROVAL"
+  | "RUN_DECISION"
+  | "PUSH_APPROVAL"
+  | "PUSH_RETRY";
+
+export interface WorkItem {
+  kind: WorkKind;
+  action: "SIGN_GATE" | "APPROVE_RUN" | "DECIDE_RUN" | "APPROVE_PUSH" | "RETRY_PUSH";
+  story_id: string;
+  jira_key: string;
+  story_summary: string;
+  phase: Phase | null;
+  entity_id: string;
+  title: string;
+  detail: string;
+  reason: string;
+  since: string | null;
+}
+
+export interface WorkQueue {
+  role: Role;
+  roles: Role[];
+  items: WorkItem[];
+  counts: Partial<Record<WorkKind, number>>;
+}
+
+export type RunStatus =
+  | "PROPOSED"
+  | "AWAITING_APPROVAL"
+  | "RUNNING"
+  | "COMPLETED"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "RERUN_REQUESTED"
+  | "FAILED";
+
+export type GateStatus = "LOCKED" | "READY_FOR_SIGNOFF" | "SIGNED_OFF" | "REJECTED";
+export type PushStatus = "DRAFT" | "APPROVED" | "SENT" | "FAILED" | "RETRYING";
+
+export interface RunSummary {
+  id: string;
+  agent_key: string;
+  phase: Phase;
+  sequence: number;
+  attempt: number;
+  status: RunStatus;
+}
+
+export interface Run extends RunSummary {
+  story_id: string;
+  prompt_version: string;
+  model: string | null;
+  input_hash: string | null;
+  input_json: Record<string, unknown> | null;
+  output_json: Record<string, unknown> | null;
+  output_hash: string | null;
+  token_usage: { input_tokens?: number; output_tokens?: number } | null;
+  guidance: string | null;
+  parent_run_id: string | null;
+  approved_by: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  decided_at: string | null;
+}
+
+export interface Gate {
+  id: string;
+  story_id: string;
+  phase: Phase;
+  status: GateStatus;
+  approver_name: string | null;
+  approver_role: string | null;
+  rationale: string | null;
+  evidence: { accepted_runs?: Array<Record<string, unknown>> } | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface StoryBase {
+  id: string;
+  jira_key: string;
+  summary: string;
+  description: string | null;
+  acceptance_criteria: string[];
+  story_points: number | null;
+  sprint: string | null;
+  jira_status: string | null;
+  assignee: string | null;
+  labels: string[];
+  priority: string | null;
+  fca_impact: "LOW" | "MEDIUM" | "HIGH" | null;
+  fca_impact_confirmed: boolean;
+  cloud: "FSC" | "SALES" | "MARKETING" | null;
+  current_phase: Phase;
+  scope_status: "ACTIVE" | "OUT_OF_SCOPE";
+  released: boolean;
+  jira_updated_at: string | null;
+  last_synced_at: string | null;
+  changed_since_agent_run: boolean;
+}
+
+export interface StoryBoard extends StoryBase {
+  runs: RunSummary[];
+  gates: Gate[];
+}
+
+export interface StoryDetail extends StoryBase {
+  runs: Run[];
+  gates: Gate[];
+}
+
+export interface AuditEvent {
+  id: number;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  actor: string;
+  payload: Record<string, unknown>;
+  payload_hash: string;
+  prev_hash: string;
+  event_hash: string;
+  created_at: string;
+}
+
+export interface PushItem {
+  id: string;
+  story_id: string;
+  push_type: "COMMENT" | "LABEL" | "TRANSITION" | "ATTACHMENT";
+  status: PushStatus;
+  payload: Record<string, unknown> & { preview_text?: string; jira_key?: string; kind?: string };
+  approved_by: string | null;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentDef {
+  key: string;
+  name: string;
+  phase: Phase;
+  sequence: number;
+  pact: string[];
+  purpose: string;
+  model_role: string;
+  blocking_capable: boolean;
+  prompt_version: string;
+}
+
+export type ArtifactKind =
+  | "SARIF"
+  | "JUNIT"
+  | "COVERAGE"
+  | "METADATA"
+  | "FINANCIAL"
+  | "GENERIC";
+
+export const ARTIFACT_KINDS: ArtifactKind[] = [
+  "SARIF",
+  "JUNIT",
+  "COVERAGE",
+  "METADATA",
+  "FINANCIAL",
+  "GENERIC",
+];
+
+export interface Artifact {
+  id: string;
+  story_id: string;
+  kind: ArtifactKind;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  parsed: Record<string, unknown>;
+  summary: string;
+  parse_error: string | null;
+  raw_excerpt: string | null;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface SyncResult {
+  total: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  out_of_scope: number;
+  flagged_conflicts: string[];
+}
+
+export interface SettingsView {
+  env: {
+    demo_mode: boolean;
+    jira_base_url: string;
+    jira_email: string;
+    jira_api_token_set: boolean;
+    anthropic_api_key_set: boolean;
+    reasoning_model: string;
+    classification_model: string;
+  };
+  settings: {
+    jira: { project_key: string; board_id: number; jql_override: string };
+    platform: { base_url: string };
+    field_mappings: Record<string, unknown>;
+    gates: Record<
+      string,
+      {
+        auto_post_comment: boolean;
+        apply_label: boolean;
+        label: string;
+        transition_name: string | null;
+        attach_evidence?: boolean;
+      }
+    >;
+    sync: { enabled: boolean; interval_minutes: number };
+  };
+}

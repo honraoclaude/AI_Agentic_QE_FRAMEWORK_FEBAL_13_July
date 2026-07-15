@@ -1,0 +1,198 @@
+from sqlalchemy import select
+
+from app.models import ArtifactKind, Story
+from app.services import workflow
+from app.services.agents import engine
+from app.services.agents.registry import AGENTS
+from app.services.artifacts import parsers, service as artifact_service
+from app.services.jira import sync_service
+
+# ------------------------------------------------------------------ parsers
+
+SARIF = """
+{"$schema":"sarif","version":"2.1.0","runs":[{"results":[
+  {"ruleId":"AvoidDoubleForCurrency","level":"error",
+   "message":{"text":"Use Decimal for currency."},
+   "locations":[{"physicalLocation":{"artifactLocation":{"uri":"RollupService.cls"},
+   "region":{"startLine":47}}}]},
+  {"ruleId":"EmptyCatchBlock","level":"warning","message":{"text":"Swallowed exception."}}
+]}]}
+"""
+
+JUNIT = """
+<testsuites><testsuite name="fsc">
+  <testcase name="rollup sums accounts" classname="RollupTest"/>
+  <testcase name="[FCA] suitability record immutable" classname="CobsTest">
+    <failure message="Record was editable after submission">assert failed</failure>
+  </testcase>
+  <testcase name="household tile renders" classname="UiTest">
+    <failure message="locator not found">stale selector</failure>
+  </testcase>
+</testsuite></testsuites>
+"""
+
+COVERAGE_JSON = '{"overall_percent": 79.0, "classes": [{"name":"RollupService","coverage_percent":72.0},{"name":"TriggerHandler","coverage_percent":90.0}]}'
+
+COBERTURA = '<coverage line-rate="0.83"><packages><package><classes><class name="RollupService" line-rate="0.72"/></classes></package></packages></coverage>'
+
+FINANCIAL_FAIL = '[{"name":"Household rollup","expected":"1250000.00","actual":"1249998.37"},{"name":"Rounding","expected":"1250.00","actual":"1250.00"}]'
+
+FINANCIAL_CSV = "name,expected,actual\nRollup,875000.00,875000.00\nFee,1000.00,1000.01\n"
+
+METADATA = '["ApexClass: HouseholdRollupService","ApexTrigger: FinancialAccountTrigger"]'
+
+
+def test_parse_sarif():
+    r = parsers.parse(ArtifactKind.SARIF, SARIF)
+    assert r["error"] is None
+    findings = r["parsed"]["findings"]
+    assert len(findings) == 2
+    assert findings[0]["rule"] == "AvoidDoubleForCurrency"
+    assert findings[0]["location"] == "RollupService.cls:47"
+    assert r["parsed"]["counts"] == {"error": 1, "warning": 1}
+
+
+def test_parse_junit():
+    r = parsers.parse(ArtifactKind.JUNIT, JUNIT)
+    p = r["parsed"]
+    assert p["total"] == 3 and p["passed"] == 1 and p["failed"] == 2
+    names = {f["name"] for f in p["failures"]}
+    assert "[FCA] suitability record immutable" in names
+
+
+def test_parse_coverage_json_and_cobertura():
+    j = parsers.parse(ArtifactKind.COVERAGE, COVERAGE_JSON)
+    assert j["parsed"]["overall_percent"] == 79.0
+    assert len(j["parsed"]["classes"]) == 2
+    x = parsers.parse(ArtifactKind.COVERAGE, COBERTURA)
+    assert x["parsed"]["overall_percent"] == 83.0
+    assert x["parsed"]["classes"][0]["coverage_percent"] == 72.0
+
+
+def test_parse_financial_json_and_csv():
+    j = parsers.parse(ArtifactKind.FINANCIAL, FINANCIAL_FAIL)
+    checks = j["parsed"]["checks"]
+    assert checks[0]["passed"] is False  # mismatch
+    assert checks[1]["passed"] is True
+    assert "release-blocking" in j["summary"]
+
+    c = parsers.parse(ArtifactKind.FINANCIAL, FINANCIAL_CSV)
+    checks = c["parsed"]["checks"]
+    assert checks[0]["passed"] is True
+    assert checks[1]["passed"] is False  # 1000.00 != 1000.01
+
+
+def test_parse_metadata_and_detect_kind():
+    r = parsers.parse(ArtifactKind.METADATA, METADATA)
+    assert len(r["parsed"]["components"]) == 2
+    assert parsers.detect_kind("scan.sarif", SARIF) == ArtifactKind.SARIF
+    assert parsers.detect_kind("results.xml", JUNIT) == ArtifactKind.JUNIT
+    assert parsers.detect_kind("cov.xml", COBERTURA) == ArtifactKind.COVERAGE
+
+
+def test_malformed_input_does_not_crash():
+    r = parsers.parse(ArtifactKind.SARIF, "{not json")
+    assert r["error"] is not None
+    assert "Invalid SARIF" in r["summary"]
+
+
+# ------------------------------------------------------------------ service
+
+
+async def _seed_story(session, adapter) -> Story:
+    await sync_service.sync_from_jira(session, adapter, actor="test")
+    await session.commit()
+    return (
+        await session.execute(select(Story).where(Story.jira_key == "WLTH-101"))
+    ).scalar_one()
+
+
+async def test_upload_parses_stores_and_audits(session, adapter):
+    story = await _seed_story(session, adapter)
+    artifact = await artifact_service.create_artifact(
+        session,
+        story.id,
+        kind=None,  # AUTO-detect
+        filename="scan.sarif",
+        content_type="application/json",
+        raw_bytes=SARIF.encode(),
+        uploaded_by="QE Lead",
+    )
+    await session.commit()
+    assert artifact.kind == ArtifactKind.SARIF
+    assert artifact.parsed["counts"]["error"] == 1
+
+    from app.models import AuditEvent
+
+    events = (
+        await session.execute(
+            select(AuditEvent).where(AuditEvent.event_type == "ARTIFACT_UPLOADED")
+        )
+    ).scalars().all()
+    assert len(events) == 1 and events[0].actor == "QE Lead"
+
+
+async def test_gather_targets_the_right_agents(session, adapter):
+    story = await _seed_story(session, adapter)
+    await artifact_service.create_artifact(
+        session, story.id, kind=ArtifactKind.SARIF, filename="s.sarif",
+        content_type=None, raw_bytes=SARIF.encode(), uploaded_by="x",
+    )
+    # static_analysis consumes SARIF; test_execution_analyst does not.
+    sa = await artifact_service.gather_for_agent(session, story.id, "static_analysis")
+    tea = await artifact_service.gather_for_agent(session, story.id, "test_execution_analyst")
+    assert len(sa) == 1 and sa[0]["kind"] == "SARIF"
+    assert tea == []
+
+
+# -------------------------------------------------- engine uses artifacts
+
+
+async def test_static_analysis_uses_uploaded_sarif(session, adapter):
+    story = await _seed_story(session, adapter)
+    await artifact_service.create_artifact(
+        session, story.id, kind=ArtifactKind.SARIF, filename="scan.sarif",
+        content_type=None, raw_bytes=SARIF.encode(), uploaded_by="x",
+    )
+    run = await workflow.latest_run(session, story.id, "story_quality")  # any run object
+    artifacts = await artifact_service.gather_for_agent(session, story.id, "static_analysis")
+    result = await engine.execute(run, story, AGENTS["static_analysis"], artifacts=artifacts)
+    issues = result["output"]["issues"]
+    assert any(i["rule"] == "AvoidDoubleForCurrency" for i in issues)
+    assert any(i["location"] == "RollupService.cls:47" for i in issues)
+
+
+async def test_financial_artifact_failure_is_release_blocking(session, adapter):
+    """The whole point: a real expected-vs-actual mismatch forces a
+    release-blocking verdict, enforced server-side."""
+    story = await _seed_story(session, adapter)
+    await artifact_service.create_artifact(
+        session, story.id, kind=ArtifactKind.FINANCIAL, filename="recon.json",
+        content_type=None, raw_bytes=FINANCIAL_FAIL.encode(), uploaded_by="x",
+    )
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    artifacts = await artifact_service.gather_for_agent(
+        session, story.id, "financial_data_integrity"
+    )
+    result = await engine.execute(
+        run, story, AGENTS["financial_data_integrity"], artifacts=artifacts
+    )
+    out = result["output"]
+    assert out["release_blocking"] is True
+    assert out["verdict"] == "FAIL"
+    # The failing check from the uploaded file is present with real figures.
+    failed = [c for c in out["checks"] if not c["passed"]]
+    assert failed and failed[0]["actual"] == "1249998.37"
+
+
+async def test_no_artifact_falls_back_to_canned(session, adapter):
+    story = await _seed_story(session, adapter)
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    artifacts = await artifact_service.gather_for_agent(session, story.id, "static_analysis")
+    assert artifacts == []
+    result = await engine.execute(run, story, AGENTS["static_analysis"], artifacts=artifacts)
+    # Falls back to the FSC review checklist (no crash, valid shape).
+    assert result["output"]["issues"]
+    assert "No SARIF uploaded" in result["output"]["summary"]
+    # All findings are AI review (no scanner findings without a scan).
+    assert all(i["source"] == "AI_AUGMENT" for i in result["output"]["issues"])

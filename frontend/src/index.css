@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+
+  /* Mission-control palette */
+  --color-bg: #0a0e17;
+  --color-panel: #111726;
+  --color-panel-2: #182034;
+  --color-line: #232d45;
+  --color-ink: #dbe4f5;
+  --color-ink-dim: #8494b4;
+  --color-ink-faint: #56648a;
+
+  --color-accent: #38bdf8; /* cyan  — running / interactive */
+  --color-ok: #34d399;     /* green — accepted / signed off */
+  --color-warn: #fbbf24;   /* amber — awaiting approval / ready */
+  --color-bad: #f87171;    /* red   — rejected / failed / blocked */
+  --color-review: #a78bfa; /* violet — completed, awaiting decision */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgb(56 189 248 / 0.06), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgb(52 211 153 / 0.04), transparent);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
