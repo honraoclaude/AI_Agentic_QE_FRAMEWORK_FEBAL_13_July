@@ -24,15 +24,20 @@ use `pip`/`npm`. It covers both demo mode (fully offline) and live mode
 
 ## Step 0 — Install the toolchain (no admin)
 
+**If browser downloads are blocked**, get the tools without a download — none of
+these is a browser download:
+- **Company Portal / IT software catalog** — request **Python 3.11+**,
+  **Node.js LTS**, and (ideally) **Git**. Most managed Windows fleets carry them.
+- **`winget`** — `winget install Python.Python.3.12`,
+  `winget install OpenJS.NodeJS.LTS`, `winget install Git.Git`.
+- **Microsoft Store** — "Python 3.12" installs per-user, no admin.
+
+**If browser downloads are allowed**, per-user installers also work:
 - **Python 3.11+** — [python.org](https://www.python.org/downloads/) → Windows
-  64-bit installer. Tick **"Add python.exe to PATH"**, choose **"Install Now"**
-  (installs per-user to `%LOCALAPPDATA%\Programs\Python`). Do **not** select
-  "Install for all users".
-- **Node.js** — nodejs.org → **"Windows Binary (.zip)"**. Extract to e.g.
-  `C:\Users\<you>\tools\node` and add that folder to your **user** PATH.
-  `npm` is bundled.
-- **Git** *(optional)* — [PortableGit](https://git-scm.com/download/win)
-  ("64-bit Portable"). Or skip git entirely and download the repo ZIP (below).
+  64-bit installer. Tick **"Add python.exe to PATH"**, choose **"Install Now"**.
+- **Node.js** — nodejs.org → **"Windows Binary (.zip)"**; extract and add to your
+  **user** PATH. `npm` is bundled.
+- **Git** *(optional)* — [PortableGit](https://git-scm.com/download/win).
 
 Verify in a fresh PowerShell: `python --version`, `npm --version`.
 
@@ -50,6 +55,25 @@ cd AI_Agentic_QE_FRAMEWORK_FEBAL_13_July
 **Option B — download ZIP (no git needed):** On the GitHub repo page, click the
 green **`< > Code`** button → **Download ZIP**. Extract it. This gives you every
 tracked file with the correct folder structure in one action.
+
+**Option C — Python downloader (when ZIP download AND copy-paste are both
+blocked):** `git clone` (Option A) already needs neither, so use it if git is
+available. If git is not available but Python is, hand-type this ~4-line script
+(only 4 lines, vs ~12,600 to type the whole codebase) as `get.py` and run
+`python get.py`:
+
+```python
+import urllib.request, tarfile
+url = "https://codeload.github.com/honraoclaude/AI_Agentic_QE_FRAMEWORK_FEBAL_13_July/tar.gz/refs/heads/main"
+urllib.request.urlretrieve(url, "repo.tar.gz")
+tarfile.open("repo.tar.gz").extractall(".")
+```
+
+It downloads the whole repo (~170 KB) and extracts it to
+`AI_Agentic_QE_FRAMEWORK_FEBAL_13_July-main\`. Behind a proxy, run
+`set HTTPS_PROXY=http://proxy:port` in the same terminal first (`urllib` honours
+it). *Git-flavoured variant:* `pip install dulwich` then
+`python -m dulwich clone <repo-url>`.
 
 > **Do not copy files one-by-one from the GitHub web UI.** See
 > [Manual copy](#appendix--manual-copy-if-you-must) for why, and what to skip if
