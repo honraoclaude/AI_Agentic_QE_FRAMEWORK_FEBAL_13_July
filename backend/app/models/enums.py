@@ -48,6 +48,7 @@ class RunStatus(str, Enum):
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
     RERUN_REQUESTED = "RERUN_REQUESTED"    # superseded by a child run
+    SKIPPED = "SKIPPED"                    # agent disabled in settings; not run
     FAILED = "FAILED"                      # engine/API error
 
 

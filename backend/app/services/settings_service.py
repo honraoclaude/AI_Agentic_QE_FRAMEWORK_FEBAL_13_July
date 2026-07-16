@@ -36,9 +36,38 @@ DEFAULT_SETTINGS: dict = {
         "RELEASE": {**_default_gate("qe-gate-4-passed"), "attach_evidence": True},
     },
     "sync": {"enabled": False, "interval_minutes": 15},
+    # Agents disabled by the org's process are auto-skipped. Blocking-capable
+    # agents (FCA / financial integrity) can never be disabled — the non-override
+    # non-negotiable — enforced in update_settings.
+    "agents": {"disabled": []},
 }
 
 _UPDATABLE_KEYS = set(DEFAULT_SETTINGS.keys())
+
+
+def _validate_agents(patch_agents: dict) -> None:
+    from .agents.registry import AGENTS
+
+    disabled = patch_agents.get("disabled")
+    if disabled is None:
+        return
+    if not isinstance(disabled, list):
+        raise ValueError("agents.disabled must be a list of agent keys")
+    unknown = [k for k in disabled if k not in AGENTS]
+    if unknown:
+        raise ValueError(f"unknown agent keys: {sorted(unknown)}")
+    locked = [k for k in disabled if AGENTS[k].blocking_capable]
+    if locked:
+        raise ValueError(
+            "blocking-capable agents cannot be disabled (FCA / financial-integrity "
+            f"checks always run): {sorted(locked)}"
+        )
+
+
+async def disabled_agents(session: AsyncSession) -> set[str]:
+    """The set of agent keys the org has switched off (auto-skipped)."""
+    settings = await get_all(session)
+    return set((settings.get("agents") or {}).get("disabled") or [])
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -68,6 +97,8 @@ async def update_settings(session: AsyncSession, patch: dict, actor: str) -> dic
     unknown = set(patch.keys()) - _UPDATABLE_KEYS
     if unknown:
         raise ValueError(f"unknown settings keys: {sorted(unknown)}")
+    if "agents" in patch and isinstance(patch["agents"], dict):
+        _validate_agents(patch["agents"])
 
     before = await get_all(session)
     for key, value in patch.items():

@@ -16,6 +16,7 @@ export function SettingsPage({ actor }: { actor: string }) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: api.agents });
   const [draft, setDraft] = useState<SettingsView["settings"] | null>(null);
   const [testing, setTesting] = useState<Record<string, unknown> | null>(null);
 
@@ -51,6 +52,16 @@ export function SettingsPage({ actor }: { actor: string }) {
     setDraft((d) =>
       d ? { ...d, gates: { ...d.gates, [phase]: { ...d.gates[phase], ...patch } } } : d,
     );
+
+  const disabledAgents = draft.agents?.disabled ?? [];
+  const toggleAgent = (key: string, enabled: boolean) =>
+    setDraft((d) => {
+      if (!d) return d;
+      const cur = new Set(d.agents?.disabled ?? []);
+      if (enabled) cur.delete(key);
+      else cur.add(key);
+      return { ...d, agents: { disabled: [...cur] } };
+    });
 
   return (
     <div className="mx-auto max-w-3xl p-5">
@@ -235,6 +246,59 @@ export function SettingsPage({ actor }: { actor: string }) {
         </div>
       </section>
 
+      {/* Agents — skip what your process doesn't do */}
+      <section className="mb-6 rounded-lg border border-line bg-panel p-4">
+        <h2 className="mb-1 text-xs font-bold uppercase tracking-widest text-ink-dim">
+          Agents — enable only what your process does
+        </h2>
+        <p className="mb-3 text-[11px] text-ink-dim">
+          Disabled agents are auto-skipped on every story (recorded in the audit trail).
+          Blocking-capable agents (FCA / financial integrity) are locked on — they always run.
+        </p>
+        <div className="flex flex-col gap-3">
+          {PHASES.map((phase) => {
+            const phaseAgents = (agentsQuery.data ?? [])
+              .filter((a) => a.phase === phase)
+              .sort((a, b) => a.sequence - b.sequence);
+            if (phaseAgents.length === 0) return null;
+            return (
+              <div key={phase}>
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-ink-faint">
+                  {phase}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {phaseAgents.map((a) => {
+                    const enabled = !disabledAgents.includes(a.key);
+                    return (
+                      <label
+                        key={a.key}
+                        className={`flex items-center gap-2 rounded border border-line px-2 py-1.5 text-[11px] ${
+                          a.blocking_capable ? "opacity-70" : "cursor-pointer hover:bg-panel-2"
+                        }`}
+                        title={a.blocking_capable ? "Locked on — always runs" : a.purpose}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={a.blocking_capable ? true : enabled}
+                          disabled={a.blocking_capable}
+                          onChange={(e) => toggleAgent(a.key, e.target.checked)}
+                        />
+                        <span className={enabled ? "text-ink" : "text-ink-faint line-through"}>
+                          {a.name}
+                        </span>
+                        {a.blocking_capable && (
+                          <Badge className="ml-auto border-line text-[9px] text-ink-faint">🔒</Badge>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
       <div className="flex justify-end gap-2">
         <Button
           variant="ghost"
@@ -252,6 +316,7 @@ export function SettingsPage({ actor }: { actor: string }) {
               jira: draft.jira,
               sync: draft.sync,
               gates: draft.gates,
+              agents: draft.agents,
             })
           }
         >

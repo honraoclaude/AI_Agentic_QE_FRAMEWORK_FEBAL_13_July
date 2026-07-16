@@ -48,6 +48,7 @@ export type RunStatus =
   | "ACCEPTED"
   | "REJECTED"
   | "RERUN_REQUESTED"
+  | "SKIPPED"
   | "FAILED";
 
 export type GateStatus = "LOCKED" | "READY_FOR_SIGNOFF" | "SIGNED_OFF" | "REJECTED";
@@ -285,5 +286,6 @@ export interface SettingsView {
       }
     >;
     sync: { enabled: boolean; interval_minutes: number };
+    agents: { disabled: string[] };
   };
 }

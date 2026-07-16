@@ -21,6 +21,7 @@ export const RUN_STATUS_META: Record<
   ACCEPTED: { label: "Accepted", dot: "bg-ok", text: "text-ok" },
   REJECTED: { label: "Rejected", dot: "bg-bad", text: "text-bad" },
   RERUN_REQUESTED: { label: "Superseded", dot: "bg-ink-faint", text: "text-ink-faint" },
+  SKIPPED: { label: "Skipped (disabled)", dot: "bg-ink-faint", text: "text-ink-faint" },
   FAILED: { label: "Failed", dot: "bg-bad animate-pulse-dot", text: "text-bad" },
 };
 

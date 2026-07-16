@@ -28,6 +28,7 @@ from ..models import (
 )
 from ..util import utcnow
 from . import audit
+from . import settings_service
 from .agents import engine
 from .agents.registry import AgentDefinition, agents_for_phase, get_agent
 
@@ -138,22 +139,30 @@ async def propose_phase_runs(
     session: AsyncSession, story: Story, phase: Phase, actor: str = "system"
 ) -> list[AgentRun]:
     """Propose the phase's agents in sequence. Nothing runs automatically:
-    the first agent is AWAITING_APPROVAL (unlocked for a human), the rest
-    are PROPOSED (locked behind their predecessor's acceptance). Idempotent."""
+    the first *active* agent is AWAITING_APPROVAL (unlocked for a human), the
+    rest are PROPOSED (locked behind their predecessor's acceptance). Agents the
+    org has disabled are recorded SKIPPED (blocking-capable agents are never
+    disabled). Idempotent."""
+    disabled = await settings_service.disabled_agents(session)
     created: list[AgentRun] = []
+    first_active_assigned = False
     for agent in agents_for_phase(phase):
         if await latest_run(session, story.id, agent.key) is not None:
             continue
+        skipped = agent.key in disabled and not agent.blocking_capable
+        if skipped:
+            status = RunStatus.SKIPPED
+        elif not first_active_assigned:
+            status = RunStatus.AWAITING_APPROVAL
+            first_active_assigned = True
+        else:
+            status = RunStatus.PROPOSED
         run = AgentRun(
             story_id=story.id,
             agent_key=agent.key,
             phase=phase,
             sequence=agent.sequence,
-            status=(
-                RunStatus.AWAITING_APPROVAL
-                if agent.sequence == 1
-                else RunStatus.PROPOSED
-            ),
+            status=status,
             prompt_version=agent.prompt_version,
         )
         session.add(run)
@@ -161,12 +170,15 @@ async def propose_phase_runs(
         created.append(run)
         await audit.record_event(
             session,
-            event_type="RUN_PROPOSED",
+            event_type="RUN_SKIPPED" if skipped else "RUN_PROPOSED",
             entity_type="agent_run",
             entity_id=run.id,
-            actor=actor,
+            actor="settings" if skipped else actor,
             payload=_run_event_payload(run),
         )
+    # An all-skipped phase has no accept to trigger readiness — evaluate now.
+    if created:
+        await recompute_gate_readiness(session, story, actor)
     return created
 
 
@@ -287,20 +299,26 @@ async def _unlock_next_agent(
     session: AsyncSession, accepted: AgentRun, actor: str
 ) -> None:
     phase_agents = agents_for_phase(accepted.phase)
-    following = [a for a in phase_agents if a.sequence == accepted.sequence + 1]
-    if not following:
+    following = sorted(
+        (a for a in phase_agents if a.sequence > accepted.sequence),
+        key=lambda a: a.sequence,
+    )
+    # Unlock the next *active* agent, stepping over any that are SKIPPED.
+    for agent in following:
+        nxt = await latest_run(session, accepted.story_id, agent.key)
+        if nxt is None or nxt.status == RunStatus.SKIPPED:
+            continue
+        if nxt.status == RunStatus.PROPOSED:
+            nxt.status = RunStatus.AWAITING_APPROVAL
+            await audit.record_event(
+                session,
+                event_type="RUN_UNLOCKED",
+                entity_type="agent_run",
+                entity_id=nxt.id,
+                actor=actor,
+                payload=_run_event_payload(nxt),
+            )
         return
-    nxt = await latest_run(session, accepted.story_id, following[0].key)
-    if nxt is not None and nxt.status == RunStatus.PROPOSED:
-        nxt.status = RunStatus.AWAITING_APPROVAL
-        await audit.record_event(
-            session,
-            event_type="RUN_UNLOCKED",
-            entity_type="agent_run",
-            entity_id=nxt.id,
-            actor=actor,
-            payload=_run_event_payload(nxt),
-        )
 
 
 async def reject_run(
@@ -415,6 +433,9 @@ async def _phase_acceptance_state(
     all_accepted = True
     for agent in agents_for_phase(phase):
         run = await latest_run(session, story.id, agent.key)
+        if run is not None and run.status == RunStatus.SKIPPED:
+            evidence.append({"agent_key": agent.key, "run_id": run.id, "status": "SKIPPED"})
+            continue
         if run is None or run.status != RunStatus.ACCEPTED:
             all_accepted = False
             continue
