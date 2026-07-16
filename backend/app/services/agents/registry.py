@@ -118,10 +118,10 @@ AGENTS: dict[str, AgentDefinition] = {
                 "Builds a requirements traceability matrix: each acceptance "
                 "criterion linked to the components that implement it and the BDD "
                 "scenarios that test it, with COVERED/PARTIAL/NOT_COVERED/"
-                "NOT_VERIFIABLE states, FCA/severity-weighted gaps, and scope-creep "
-                "detection."
+                "NOT_VERIFIABLE states, FCA/severity-weighted gaps, scope-creep "
+                "detection, and bidirectional traceability (orphan tests + score)."
             ),
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         AgentDefinition(
             key="apex_coverage",
@@ -132,10 +132,10 @@ AGENTS: dict[str, AgentDefinition] = {
             purpose=(
                 "Per-class coverage vs the 85% policy and 75% deploy floor, with "
                 "assertion-quality risk, structured gaps (bulk/negative/exception/"
-                "sharing), financial-critical weighting, and drafted tests traced to "
-                "gaps and BDD scenarios with a projected coverage delta."
+                "sharing), financial-critical weighting, coverage-on-new-code gate, "
+                "and drafted tests traced to gaps and BDD scenarios."
             ),
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         AgentDefinition(
             key="static_analysis",
@@ -147,9 +147,10 @@ AGENTS: dict[str, AgentDefinition] = {
                 "Triages PMD/Copado SARIF output (dedupe + suppress noise) and adds "
                 "FSC-specific security/quality findings the scanner can't — each "
                 "categorized, sourced (scanner vs AI), CWE/OWASP-mapped, with "
-                "remediation, feeding a deterministic quality gate."
+                "remediation, an issue taxonomy, A–E ratings and technical-debt "
+                "estimate, feeding a deterministic quality gate."
             ),
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         AgentDefinition(
             key="code_review",

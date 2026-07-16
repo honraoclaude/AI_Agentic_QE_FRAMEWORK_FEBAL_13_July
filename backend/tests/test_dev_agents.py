@@ -119,3 +119,43 @@ def test_deployability_succeeds_when_clean():
     assert parsed.verdict == "PASS"
     assert parsed.components.total >= 1
     assert parsed.release_blocking is False
+
+
+# ------------------------------------------------ v3 enrichment of existing 3
+
+
+def test_static_analysis_v3_taxonomy_ratings_debt():
+    from app.services.agents.output_schemas import StaticAnalysisOutput
+
+    body = build("static_analysis", _story(), None, artifacts=[SARIF, METADATA])
+    parsed = StaticAnalysisOutput.model_validate(body)
+    # Every issue carries the SonarQube taxonomy + remediation effort.
+    assert parsed.issues and all(i.effort_minutes > 0 for i in parsed.issues)
+    tax = parsed.taxonomy
+    assert (tax.bug + tax.vulnerability + tax.code_smell + tax.security_hotspot) == len(parsed.issues)
+    assert parsed.ratings.reliability in ("A", "B", "C", "D", "E")
+    assert parsed.ratings.security in ("A", "B", "C", "D", "E")
+    assert "h" in parsed.technical_debt.effort  # e.g. "1h 40m"
+
+
+def test_apex_coverage_v3_new_code_gate():
+    from app.services.agents.output_schemas import ApexCoverageOutput
+
+    body = build("apex_coverage", _story(), None, artifacts=[])
+    parsed = ApexCoverageOutput.model_validate(body)
+    assert parsed.new_code.target == 80.0
+    assert parsed.new_code.changed_classes >= 1
+    assert isinstance(parsed.gate_passed, bool)
+    # Gate requires BOTH overall floor and new-code target.
+    assert parsed.gate_passed == (parsed.deployable and parsed.new_code.meets_target)
+
+
+def test_ac_compliance_v3_bidirectional_traceability():
+    from app.services.agents.output_schemas import AcComplianceOutput
+
+    body = build("ac_compliance", _story(), None, artifacts=[METADATA])
+    parsed = AcComplianceOutput.model_validate(body)
+    assert isinstance(parsed.traceability.score_percent, float)
+    assert isinstance(parsed.traceability.gate_passed, bool)
+    # No BDD upstream here -> a canned orphan test illustrates reverse traceability.
+    assert parsed.traceability.orphan_tests

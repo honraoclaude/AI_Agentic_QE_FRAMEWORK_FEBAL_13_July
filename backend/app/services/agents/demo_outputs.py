@@ -744,6 +744,27 @@ def ac_compliance(story: Story, artifacts=None, upstream=None) -> dict:
     else:
         verdict = "PASS"
 
+    # v3: reverse traceability (test -> requirement). Scenarios covering no
+    # criterion are orphans (gold-plating / hidden scope / missing requirement).
+    TRACE_TARGET = 80.0
+    used_titles = {t for m in mapping for t in (m["test_coverage"]["scenarios"] or [])}
+    orphan_tests = [
+        {"test": s.get("title", "scenario"),
+         "concern": "Scenario maps to no acceptance criterion — confirm it is in scope."}
+        for s in bdd_scenarios
+        if s.get("title") and s["title"] not in used_titles
+    ][:3]
+    if not bdd_scenarios:
+        orphan_tests = [
+            {"test": "Household tile renders within 2 seconds",
+             "concern": "Non-functional scenario with no matching AC — hidden performance scope."}
+        ]
+    traceability = {
+        "score_percent": pct,
+        "orphan_tests": orphan_tests,
+        "gate_passed": pct >= TRACE_TARGET,
+    }
+
     return {
         "verdict": verdict,
         "summary": (
@@ -774,6 +795,7 @@ def ac_compliance(story: Story, artifacts=None, upstream=None) -> dict:
             "not_verifiable": counts["not_verifiable"],
             "ac_covered_percent": pct,
         },
+        "traceability": traceability,
         "confidence": "HIGH" if have_meta else "LOW",
     }
 
@@ -896,6 +918,19 @@ def apex_coverage(story: Story, artifacts=None, upstream=None) -> dict:
     # Each drafted test lifts the weakest classes; project a realistic delta.
     projected = min(95.0, round(overall + (0 if threshold_met else 6.0), 1))
 
+    # v3: coverage-on-new-code — the changed classes are the ones under review;
+    # the gate enforces coverage on new code, not just the overall number.
+    NEW_CODE_TARGET = 80.0
+    changed = classes  # in a real run this is the diff set; here the reported classes
+    new_cov = (
+        round(sum(c["coverage_percent"] for c in changed) / len(changed), 1)
+        if changed
+        else 0.0
+    )
+    new_uncovered = [c["class_name"] for c in changed if c["coverage_percent"] < NEW_CODE_TARGET]
+    new_meets = not new_uncovered
+    gate_passed = bool(deployable and new_meets)
+
     if not deployable or fin_below:
         verdict = "FAIL"
     elif any(c["assertion_risk"] == "HIGH" for c in classes) or below:
@@ -939,6 +974,14 @@ def apex_coverage(story: Story, artifacts=None, upstream=None) -> dict:
         "threshold": {"per_class_target": PER_CLASS_TARGET, "platform_floor": PLATFORM_FLOOR},
         "threshold_met": threshold_met,
         "deployable": deployable,
+        "new_code": {
+            "changed_classes": len(changed),
+            "covered_percent": new_cov,
+            "target": NEW_CODE_TARGET,
+            "meets_target": new_meets,
+            "uncovered_components": new_uncovered,
+        },
+        "gate_passed": gate_passed,
         "drafted_tests": drafted,
     }
 
@@ -1100,6 +1143,40 @@ def static_analysis(story: Story, artifacts=None) -> dict:
     ]
     gate_passed = all(c["status"] == "PASS" for c in gate_conditions)
 
+    # v3: SonarQube-style taxonomy, effort, ratings and technical debt (additive).
+    _EFFORT = {"CRITICAL": 60, "HIGH": 40, "MEDIUM": 20, "LOW": 10}
+    for i in issues:
+        if i["category"] in ("SECURITY", "SHARING_VISIBILITY"):
+            i["issue_type"] = "VULNERABILITY" if i.get("confidence") == "HIGH" else "SECURITY_HOTSPOT"
+        elif i["category"] in ("FINANCIAL_ACCURACY", "AUDITABILITY"):
+            i["issue_type"] = "BUG"
+        else:
+            i["issue_type"] = "CODE_SMELL"
+        i["effort_minutes"] = _EFFORT.get(i["severity"], 15)
+
+    taxonomy = {
+        "bug": sum(1 for i in issues if i["issue_type"] == "BUG"),
+        "vulnerability": sum(1 for i in issues if i["issue_type"] == "VULNERABILITY"),
+        "code_smell": sum(1 for i in issues if i["issue_type"] == "CODE_SMELL"),
+        "security_hotspot": sum(1 for i in issues if i["issue_type"] == "SECURITY_HOTSPOT"),
+    }
+    total_min = sum(i["effort_minutes"] for i in issues)
+    debt_ratio = round(min(total_min / 480.0 * 100, 100.0), 1)  # vs a notional dev-day
+
+    def _rating_by_count(n: int) -> str:
+        return "A" if n == 0 else "B" if n <= 1 else "C" if n <= 3 else "D"
+
+    def _maint_rating(ratio: float) -> str:
+        return ("A" if ratio < 5 else "B" if ratio < 10 else "C" if ratio < 20
+                else "D" if ratio < 50 else "E")
+
+    ratings = {
+        "reliability": _rating_by_count(taxonomy["bug"]),
+        "security": _rating_by_count(taxonomy["vulnerability"] + taxonomy["security_hotspot"]),
+        "maintainability": _maint_rating(debt_ratio),
+    }
+    technical_debt = {"effort": f"{total_min // 60}h {total_min % 60}m", "debt_ratio_percent": debt_ratio}
+
     verdict = "PASS" if gate_passed else "FAIL"
     if gate_passed and counts["medium"]:
         verdict = "WARN"
@@ -1110,8 +1187,10 @@ def static_analysis(story: Story, artifacts=None) -> dict:
             f"{len(issues)} issue(s) after triage{scan_note}"
             + (f" ({len(suppressed)} suppressed as noise)" if suppressed else "")
             + f": {counts['blocking_count']} blocking (CRITICAL+HIGH), "
-            f"{added_by_ai} added by FSC review. Quality gate: "
-            + ("PASS." if gate_passed else "FAIL.")
+            f"{added_by_ai} added by FSC review. "
+            f"Ratings R:{ratings['reliability']} S:{ratings['security']} "
+            f"M:{ratings['maintainability']}; debt {technical_debt['effort']}. "
+            f"Quality gate: " + ("PASS." if gate_passed else "FAIL.")
             + meta_note
             + (
                 ""
@@ -1134,6 +1213,9 @@ def static_analysis(story: Story, artifacts=None) -> dict:
             "suppressed": len(suppressed),
         },
         "counts": counts,
+        "taxonomy": taxonomy,
+        "ratings": ratings,
+        "technical_debt": technical_debt,
         "quality_gate": {"conditions": gate_conditions, "passed": gate_passed},
     }
 

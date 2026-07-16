@@ -310,12 +310,27 @@ class AcCoverage(BaseModel):
     ac_covered_percent: float
 
 
+class OrphanTest(BaseModel):
+    test: str = Field(description="A BDD scenario / test that maps to no acceptance criterion")
+    concern: str = Field(description="Gold-plating / hidden scope / missing requirement")
+
+
+class Traceability(BaseModel):
+    """The reverse direction of the RTM: test -> requirement. Completes
+    bidirectional traceability expected in regulated delivery."""
+
+    score_percent: float = Field(description="% of acceptance criteria fully COVERED")
+    orphan_tests: list[OrphanTest]
+    gate_passed: bool = Field(description="Traceability score meets the threshold")
+
+
 class AcComplianceOutput(AgentOutputBase):
     ac_mapping: list[AcMappingItem]
     unmapped_work: list[UnmappedWork] = Field(
         description="Changed work mapping to no acceptance criterion (scope creep)"
     )
     coverage: AcCoverage
+    traceability: Traceability
     confidence: Literal["HIGH", "LOW"] = Field(
         description="HIGH when real change artifacts were analysed, LOW when inferred"
     )
@@ -362,6 +377,19 @@ class DraftedTest(BaseModel):
     test_data: str = Field(description="TestDataFactory fixtures the test needs")
 
 
+class NewCodeCoverage(BaseModel):
+    """Coverage on the CHANGED components specifically — the industry-standard
+    'coverage on new code' gate (catches 'high overall, untested new method')."""
+
+    changed_classes: int
+    covered_percent: float
+    target: float = Field(description="New-code coverage target, e.g. 80")
+    meets_target: bool
+    uncovered_components: list[str] = Field(
+        description="Changed components below the new-code target"
+    )
+
+
 class ApexCoverageOutput(AgentOutputBase):
     classes: list[ApexClassCoverage]
     overall_coverage_percent: float
@@ -372,6 +400,10 @@ class ApexCoverageOutput(AgentOutputBase):
     threshold_met: bool
     deployable: bool = Field(
         description="Would the Copado/SFDX deploy pass (overall >= platform floor)?"
+    )
+    new_code: NewCodeCoverage
+    gate_passed: bool = Field(
+        description="Coverage gate: overall >= floor AND new-code >= target"
     )
     drafted_tests: list[DraftedTest]
 
@@ -391,10 +423,17 @@ class StaticStandard(BaseModel):
     owasp: str = Field(description="OWASP category, e.g. A01:2021 Broken Access Control")
 
 
+IssueType = Literal["BUG", "VULNERABILITY", "CODE_SMELL", "SECURITY_HOTSPOT"]
+
+
 class StaticIssue(BaseModel):
     rule: str
     severity: Severity
     category: IssueCategory
+    issue_type: IssueType = Field(
+        default="CODE_SMELL",
+        description="SonarQube taxonomy: bug / vulnerability / code smell / security hotspot",
+    )
     source: Literal["SCANNER", "AI_AUGMENT"] = Field(
         description="SCANNER (from the SARIF scan) vs AI_AUGMENT (FSC review the "
         "scanner cannot do)"
@@ -402,6 +441,9 @@ class StaticIssue(BaseModel):
     location: str
     detail: str
     remediation: str = Field(description="The concrete fix")
+    effort_minutes: int = Field(
+        default=0, description="Estimated remediation effort in minutes (SQALE)"
+    )
     confidence: Literal["HIGH", "MEDIUM", "LOW"] = Field(
         description="Certainty / false-positive risk"
     )
@@ -450,11 +492,41 @@ class QualityGate(BaseModel):
     passed: bool
 
 
+Rating = Literal["A", "B", "C", "D", "E"]
+
+
+class Ratings(BaseModel):
+    """SonarQube-style A–E ratings scorecard."""
+
+    reliability: Rating = Field(description="Driven by bug count/severity")
+    security: Rating = Field(description="Driven by vulnerabilities/hotspots")
+    maintainability: Rating = Field(description="Driven by code smells / debt ratio")
+
+
+class IssueTaxonomy(BaseModel):
+    bug: int
+    vulnerability: int
+    code_smell: int
+    security_hotspot: int
+
+
+class TechnicalDebt(BaseModel):
+    effort: str = Field(description="Total remediation effort, e.g. '3h 40m'")
+    debt_ratio_percent: float = Field(
+        description="Remediation cost vs development cost (SQALE debt ratio)"
+    )
+
+
 class StaticAnalysisOutput(AgentOutputBase):
     issues: list[StaticIssue]
     suppressed: list[SuppressedFinding]
     triage: TriageSummary
     counts: StaticCounts
+    taxonomy: IssueTaxonomy = Field(
+        description="Issue counts by SonarQube type (bug/vuln/smell/hotspot)"
+    )
+    ratings: Ratings
+    technical_debt: TechnicalDebt
     quality_gate: QualityGate
 
 
