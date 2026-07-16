@@ -159,12 +159,13 @@ AGENTS: dict[str, AgentDefinition] = {
             sequence=4,
             pact=("Autonomous", "Collaborative"),
             purpose=(
-                "Automated peer review: complexity and maintainability metrics "
-                "(cyclomatic complexity, method length, duplication), categorised "
-                "review comments with concrete suggestions, complexity hotspots, and "
-                "an APPROVE / COMMENT / REQUEST_CHANGES recommendation — the standards "
-                "layer above raw static analysis."
+                "Automated peer review: complexity and maintainability metrics, "
+                "categorised review comments with concrete suggestions (grounded in "
+                "the actual changed source pulled from the branch — SOQL-in-loop, "
+                "sharing), complexity hotspots, and an APPROVE / COMMENT / "
+                "REQUEST_CHANGES recommendation — the standards layer above static analysis."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="deployability_validation",

@@ -1236,14 +1236,53 @@ _REVIEW_CAT = {
 }
 
 
+def _scan_source(filename: str, text: str) -> list[dict]:
+    """Lightweight review of actual changed source (GitHub GENERIC artifacts) —
+    the design-level checks a SARIF scan doesn't give you. Flags SOQL executed
+    inside a loop and classes missing a sharing declaration, with real line refs."""
+    out: list[dict] = []
+    for_indents: list[int] = []
+    flagged_sharing = False
+    for idx, raw in enumerate(text.splitlines(), 1):
+        low = raw.strip().lower()
+        indent = len(raw) - len(raw.lstrip())
+        for_indents = [i for i in for_indents if i < indent]  # exit dedented loops
+        if "[select" in low and for_indents:
+            out.append({
+                "file": filename, "line": idx, "category": "COMPLEXITY", "severity": "HIGH",
+                "comment": "SOQL query executed inside a loop — breaches governor limits at scale.",
+                "suggestion": "Move the query out of the loop and bulkify (query once, map by key).",
+            })
+        if low.startswith("for ") or low.startswith("for("):
+            for_indents.append(indent)
+        if (not flagged_sharing and "class " in low and "test" not in filename.lower()
+                and "with sharing" not in low and "without sharing" not in low):
+            flagged_sharing = True
+            out.append({
+                "file": filename, "line": idx, "category": "BEST_PRACTICE", "severity": "MEDIUM",
+                "comment": "Class handling client data has no sharing declaration.",
+                "suggestion": "Declare 'with sharing' to enforce record-level security.",
+            })
+    return out
+
+
 def code_review(story: Story, artifacts=None) -> dict:
     sarif = _parsed(artifacts, "SARIF")
     meta = _parsed(artifacts, "METADATA")
-    note = _artifact_note(artifacts, "SARIF") or _artifact_note(artifacts, "METADATA")
+    note = (_artifact_note(artifacts, "SARIF") or _artifact_note(artifacts, "METADATA")
+            or _artifact_note(artifacts, "GENERIC"))
     components = (meta or {}).get("components", []) if meta else []
-    files_reviewed = max(len(components), 3)
+    sources = [
+        (a.get("filename", "source"), (a.get("parsed") or {}).get("text", ""))
+        for a in (artifacts or [])
+        if a.get("kind") == "GENERIC" and (a.get("parsed") or {}).get("text")
+    ]
+    files_reviewed = max(len(components), len(sources), 3)
 
     comments: list[dict] = []
+    # Review the actual changed source pulled from the branch, when present.
+    for fn, txt in sources:
+        comments.extend(_scan_source(fn, txt))
     if sarif and sarif.get("findings"):
         for f in sarif["findings"][:6]:
             cat, suggestion = _REVIEW_CAT.get(
@@ -1259,17 +1298,19 @@ def code_review(story: Story, artifacts=None) -> dict:
                     "suggestion": suggestion,
                 }
             )
-    # Design/maintainability comments the scanner cannot make.
-    comments.append(
-        {
-            "file": "HouseholdRollupService.cls",
-            "line": 142,
-            "category": "COMPLEXITY",
-            "severity": "MEDIUM",
-            "comment": "recalculate() mixes querying, aggregation and DML in one method.",
-            "suggestion": "Extract a bulkified query helper and a pure aggregation method.",
-        }
-    )
+    # Design/maintainability comments the scanner cannot make (only when we had
+    # no real source to review — otherwise the source scan speaks for itself).
+    if not sources:
+        comments.append(
+            {
+                "file": "HouseholdRollupService.cls",
+                "line": 142,
+                "category": "COMPLEXITY",
+                "severity": "MEDIUM",
+                "comment": "recalculate() mixes querying, aggregation and DML in one method.",
+                "suggestion": "Extract a bulkified query helper and a pure aggregation method.",
+            }
+        )
     comments.append(
         {
             "file": "HouseholdRollupServiceTest.cls",
@@ -1299,8 +1340,9 @@ def code_review(story: Story, artifacts=None) -> dict:
     return {
         "verdict": verdict,
         "summary": (
-            f"Automated review of {files_reviewed} file(s){note}: {len(comments)} "
-            f"comment(s), {high} needing changes. Recommendation: {rec}."
+            f"Automated review of {files_reviewed} file(s){note}"
+            + (f", {len(sources)} source file(s) read" if sources else "")
+            + f": {len(comments)} comment(s), {high} needing changes. Recommendation: {rec}."
         ),
         "findings": [
             {"title": f"{c['category'].title()} — {c['file']}", "detail": c["comment"],

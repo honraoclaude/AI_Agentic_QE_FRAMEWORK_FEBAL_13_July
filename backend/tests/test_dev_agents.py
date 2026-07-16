@@ -90,6 +90,31 @@ def test_code_review_from_sarif():
     assert parsed.release_blocking is False
 
 
+def test_code_review_reads_github_source_files():
+    from app.services.agents.output_schemas import CodeReviewOutput
+
+    # A GENERIC artifact = actual source pulled from the connected GitHub branch.
+    source = _artifact("GENERIC", {"text": (
+        "public with sharing class Rollup {\n"
+        "    public static void run(Id hid) {\n"
+        "        for (Account a : [SELECT Id FROM Account]) {\n"
+        "            for (Fin__c f : [SELECT Balance__c FROM Fin__c WHERE H__c = :a.Id]) {\n"
+        "                total += f.Balance__c;\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )})
+    body = build("code_review", _story(), None, artifacts=[source])
+    parsed = CodeReviewOutput.model_validate(body)
+    # The nested SOQL-in-loop is flagged, anchored to the real file + line.
+    soql = [c for c in parsed.review_comments
+            if c.category == "COMPLEXITY" and "loop" in c.comment.lower()]
+    assert soql and soql[0].file == "f.generic" and soql[0].line is not None
+    assert parsed.approval_recommendation == "REQUEST_CHANGES"  # HIGH finding
+    assert parsed.release_blocking is False
+
+
 def test_code_review_clean_is_advisory_only():
     # No artifacts -> only the AI design/test comments (MEDIUM) -> COMMENT/WARN.
     body = build("code_review", _story(), None, artifacts=[])
