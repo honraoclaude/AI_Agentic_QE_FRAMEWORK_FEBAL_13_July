@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.models import Phase, Story
-from app.services import evidence_pack, workflow
+from app.services import evidence_pack, settings_service, workflow
 from app.services.agents.registry import agents_for_phase
 from app.services.jira import sync_service
 
@@ -41,6 +41,22 @@ async def test_assemble_structure(session, adapter):
     # Health synthesis + verified chain.
     assert pack["health"]["score"] is not None
     assert pack["audit_chain_verification"]["valid"] is True
+
+
+async def test_skipped_agents_shown_in_pack(session, adapter):
+    # Disable an advisory Refinement agent BEFORE bootstrap so it is recorded
+    # SKIPPED immediately (only the current phase is proposed at bootstrap).
+    await settings_service.update_settings(
+        session, {"agents": {"disabled": ["three_amigos"]}}, actor="admin")
+    story = await _seed(session, adapter)
+
+    pack = await evidence_pack.assemble(session, story)
+    names = [s["agent_name"] for s in pack["skipped_agents"]]
+    assert any("Three Amigos" in n for n in names)
+
+    html = evidence_pack.render_html(pack)
+    assert "Skipped by policy" in html
+    assert "Three Amigos" in html
 
 
 async def test_render_html_is_complete_document(session, adapter):

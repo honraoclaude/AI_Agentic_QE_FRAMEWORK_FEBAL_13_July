@@ -12,9 +12,10 @@ and enriches it with the human-readable results the auditor actually wants.
 
 import html
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Story
+from ..models import AgentRun, RunStatus, Story
 from . import referee
 from .agents.registry import get_agent
 from .jira.push_service import build_release_audit_pack
@@ -65,9 +66,25 @@ async def assemble(session: AsyncSession, story: Story) -> dict:
         "audit_report_sections": out("regulatory_audit_trail").get("report_sections", []),
     }
 
+    # Agents intentionally not run (disabled by the org's process) — the auditor
+    # sees exactly what was skipped and why.
+    skipped_rows = (
+        await session.execute(
+            select(AgentRun).where(
+                AgentRun.story_id == story.id, AgentRun.status == RunStatus.SKIPPED
+            )
+        )
+    ).scalars().all()
+    skipped = [
+        {"agent_name": _agent_name(r.agent_key), "phase": r.phase.value}
+        for r in skipped_rows
+    ]
+    skipped.sort(key=lambda s: (s["phase"], s["agent_name"]))
+
     pack["platform"] = PLATFORM
     pack["health"] = health
     pack["agents"] = agents
+    pack["skipped_agents"] = skipped
     pack["regulatory"] = regulatory
     return pack
 
@@ -161,6 +178,15 @@ def render_html(pack: dict) -> str:
         for sec in reg["audit_report_sections"]
     ) or '<p class="muted">Regulatory Audit Trail agent has not run.</p>'
 
+    skipped = pack.get("skipped_agents", [])
+    skipped_note = (
+        '<p class="muted">⊘ Skipped by policy (disabled in settings, not run): '
+        + ", ".join(f"{_e(s['agent_name'])} ({_e(s['phase'])})" for s in skipped)
+        + ". Blocking-capable agents (FCA / financial integrity) cannot be disabled and always run.</p>"
+        if skipped
+        else '<p class="muted">No agents were skipped — the full configured pipeline ran.</p>'
+    )
+
     band = h.get("band", "NO_DATA")
     band_cls = {"HEALTHY": "ok", "AT_RISK": "warn", "CRITICAL": "bad", "BLOCKED": "bad"}.get(band, "muted")
 
@@ -229,6 +255,7 @@ def render_html(pack: dict) -> str:
 <p class="muted">Every agent run recorded with prompt version, model, token usage and output hash.</p>
 <table><thead><tr><th>Agent</th><th>Phase</th><th>Verdict</th><th>Confidence</th><th>Prompt</th><th>Model</th><th>Tokens (in/out)</th><th>Output hash</th></tr></thead>
 <tbody>{agent_rows}</tbody></table>
+{skipped_note}
 
 <h2>6 · Regulatory Audit Narrative</h2>
 {audit_sections}
