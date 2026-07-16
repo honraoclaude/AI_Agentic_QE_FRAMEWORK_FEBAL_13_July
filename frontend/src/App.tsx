@@ -76,7 +76,7 @@ export default function App() {
           <span className="font-mono text-lg font-bold tracking-tight text-accent">
             AI Agentic <span className="text-ink">QE Platform</span>
           </span>
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-faint">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
             AI That Tests. Humans Who Trust.
           </span>
         </div>
