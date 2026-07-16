@@ -262,23 +262,10 @@ AGENTS: dict[str, AgentDefinition] = {
             ),
         ),
         AgentDefinition(
-            key="uat_test_design",
-            name="UAT / Acceptance Test Design Agent",
-            phase=Phase.TESTING,
-            sequence=7,
-            pact=("Collaborative",),
-            purpose=(
-                "Designs business-readable UAT / acceptance test cases from the "
-                "acceptance criteria (persona, steps, expected result, AC trace, "
-                "priority) and the required sign-off roles — feeding the Release UAT "
-                "coordinator."
-            ),
-        ),
-        AgentDefinition(
             key="test_data_management",
             name="Test Data Management Agent",
             phase=Phase.TESTING,
-            sequence=8,
+            sequence=7,
             pact=("Proactive", "Targeted"),
             purpose=(
                 "Specifies the compliant test-data fixtures a story needs — synthetic "
@@ -301,13 +288,14 @@ AGENTS: dict[str, AgentDefinition] = {
         ),
         AgentDefinition(
             key="uat_signoff_coordinator",
-            name="UAT Sign-Off Coordinator",
+            name="Business Sign-Off Coordinator",
             phase=Phase.RELEASE,
             sequence=2,
             pact=("Collaborative",),
             purpose=(
-                "Tracks required approvals: PO + Business stakeholder always; "
-                "+ Compliance Officer when FCA impact = HIGH."
+                "Coordinates the business demo sign-off: tracks the required "
+                "approvers — PO + Business stakeholder always; + Compliance Officer "
+                "when FCA impact = HIGH."
             ),
         ),
         AgentDefinition(

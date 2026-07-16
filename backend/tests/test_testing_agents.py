@@ -1,6 +1,6 @@
-"""Five industry-standard Testing-phase agents: Integration & E2E Journey,
-Defect Triage, Security (DAST), UAT Test Design, Test Data Management.
-Advisory, non-blocking, appended at Testing seq 4-8.
+"""Industry-standard Testing-phase agents: Integration & E2E Journey,
+Defect Triage, Security (DAST), Test Data Management.
+Advisory, non-blocking, appended at Testing seq 4-7.
 """
 
 from app.models import Phase
@@ -10,7 +10,6 @@ from app.services.agents.output_schemas import (
     DefectTriageOutput,
     E2EJourneyOutput,
     SecurityDastOutput,
-    UatTestDesignOutput,
 )
 from app.services.agents.output_schemas import TestDataOutput as TDMOutput  # aliased: avoid pytest Test* collection
 from app.services.agents.registry import agents_for_phase
@@ -48,18 +47,18 @@ JUNIT_PASS = _artifact("JUNIT", {
     "total": 3, "passed": 3, "failed": 0, "errors": 0, "skipped": 0, "failures": [], "all_tests": ["a", "b", "c"]})
 
 
-def test_testing_phase_has_eight_agents_in_order():
+def test_testing_phase_has_seven_agents_in_order():
     seq = [a.key for a in agents_for_phase(Phase.TESTING)]
     assert seq == [
         "test_execution_analyst", "financial_data_integrity", "regression_scope",
         "integration_e2e_journey", "defect_triage", "security_dast",
-        "uat_test_design", "test_data_management",
+        "test_data_management",
     ]
 
 
-def test_all_five_registered():
+def test_new_testing_agents_registered():
     for key in ("integration_e2e_journey", "defect_triage", "security_dast",
-                "uat_test_design", "test_data_management"):
+                "test_data_management"):
         assert key in OUTPUT_SCHEMAS and key in GENERATORS
 
 
@@ -90,15 +89,6 @@ def test_integration_e2e_journey_maps_clouds():
     assert parsed.journeys
     assert any("FSC" in j.clouds for j in parsed.journeys)
     assert parsed.total_integration_points >= 1
-    assert parsed.release_blocking is False
-
-
-def test_uat_design_covers_criteria_and_roles():
-    body = build("uat_test_design", _story(fca="HIGH"), None, artifacts=[], upstream=[])
-    parsed = UatTestDesignOutput.model_validate(body)
-    assert parsed.test_cases and parsed.ac_covered == parsed.ac_total
-    # FCA HIGH -> Compliance Officer required.
-    assert "Compliance Officer" in parsed.sign_off_roles
     assert parsed.release_blocking is False
 
 

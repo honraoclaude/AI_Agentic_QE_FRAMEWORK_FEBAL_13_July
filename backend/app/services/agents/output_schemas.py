@@ -814,26 +814,6 @@ class DefectTriageOutput(AgentOutputBase):
     flaky_count: int
 
 
-# --- Testing: UAT / Acceptance Test Design -------------------------------
-
-
-class UatCase(BaseModel):
-    id: str
-    title: str
-    persona: str = Field(description="Business role executing the test, e.g. Adviser")
-    steps: list[str]
-    expected_result: str
-    ac_ref: str = Field(description="The acceptance criterion this validates")
-    priority: Literal["P1", "P2", "P3"]
-
-
-class UatTestDesignOutput(AgentOutputBase):
-    test_cases: list[UatCase]
-    sign_off_roles: list[str]
-    ac_covered: int
-    ac_total: int
-
-
 # --- Testing: Test Data Management ---------------------------------------
 
 
@@ -1014,7 +994,6 @@ OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "regression_scope": RegressionScopeOutput,
     "integration_e2e_journey": E2EJourneyOutput,
     "defect_triage": DefectTriageOutput,
-    "uat_test_design": UatTestDesignOutput,
     "test_data_management": TestDataOutput,
     "security_dast": SecurityDastOutput,
     "release_readiness": ReleaseReadinessOutput,

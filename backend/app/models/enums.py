@@ -103,7 +103,6 @@ AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
     "regression_scope": ["bdd_generator"],
     "integration_e2e_journey": ["bdd_generator", "regression_scope"],
     "defect_triage": ["test_execution_analyst"],
-    "uat_test_design": ["bdd_generator", "compliance_ac_advisor"],
     "post_deploy_verification": ["bdd_generator"],
     "release_notes": ["bdd_generator", "ac_compliance"],
 }

@@ -2005,40 +2005,6 @@ def security_dast(story: Story, artifacts=None) -> dict:
     }
 
 
-def uat_test_design(story: Story, artifacts=None, upstream=None) -> dict:
-    criteria = _ac(story)
-    cases = []
-    for i, c in enumerate(criteria, 1):
-        cases.append({
-            "id": f"UAT-{story.jira_key}-{i:02d}",
-            "title": f"Verify: {c[:70]}",
-            "persona": "Adviser" if i % 2 else "Paraplanner",
-            "steps": [
-                "Log in to the wealth portal as the persona",
-                "Open the client's household summary",
-                "Perform the action described by the acceptance criterion",
-            ],
-            "expected_result": f"The system behaves per the criterion: {c[:80]}",
-            "ac_ref": c[:80],
-            "priority": "P1" if _is_fca_criterion(c) else "P2",
-        })
-    fca_high = (story.fca_impact.value if story.fca_impact else "HIGH") == "HIGH"
-    roles = ["Product Owner", "Business Stakeholder"] + (["Compliance Officer"] if fca_high else [])
-    return {
-        "verdict": "PASS" if cases else "WARN",
-        "summary": (
-            f"{len(cases)} UAT case(s) designed for {story.jira_key}, covering "
-            f"{len(cases)}/{len(criteria)} acceptance criteria. Sign-off: {', '.join(roles)}."
-        ),
-        "findings": [],
-        "release_blocking": False,
-        "test_cases": cases,
-        "sign_off_roles": roles,
-        "ac_covered": len(cases),
-        "ac_total": len(criteria),
-    }
-
-
 def test_data_management(story: Story, artifacts=None) -> dict:
     meta = _parsed(artifacts, "METADATA")
     note = _artifact_note(artifacts, "METADATA")
@@ -2387,7 +2353,6 @@ GENERATORS = {
     "integration_e2e_journey": integration_e2e_journey,
     "defect_triage": defect_triage,
     "security_dast": security_dast,
-    "uat_test_design": uat_test_design,
     "test_data_management": test_data_management,
     "release_readiness": release_readiness,
     "uat_signoff_coordinator": uat_signoff_coordinator,
