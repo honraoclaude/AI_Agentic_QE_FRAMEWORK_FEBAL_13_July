@@ -165,7 +165,7 @@ async def test_ac_compliance_v2_rtm(session, adapter):
     # No artifact -> NOT_VERIFIABLE with LOW confidence.
     body = build("ac_compliance", story, None, artifacts=[], upstream=[])
     parsed = AcComplianceOutput.model_validate(body)
-    assert parsed.confidence == "LOW"
+    assert parsed.evidence_confidence == "LOW"
     assert all(m.status == "NOT_VERIFIABLE" for m in parsed.ac_mapping)
 
     # With a metadata manifest + upstream BDD -> real statuses, components, tests.
@@ -188,7 +188,7 @@ async def test_ac_compliance_v2_rtm(session, adapter):
     body = build("ac_compliance", story, None, artifacts=artifacts, upstream=upstream)
     parsed = AcComplianceOutput.model_validate(body)
 
-    assert parsed.confidence == "HIGH"
+    assert parsed.evidence_confidence == "HIGH"
     statuses = {m.status for m in parsed.ac_mapping}
     assert "COVERED" in statuses and ("NOT_COVERED" in statuses or "PARTIAL" in statuses)
     # Component traceability + coverage counts reconcile.

@@ -19,10 +19,35 @@ class Finding(BaseModel):
     severity: Severity
 
 
+class Confidence(BaseModel):
+    """The agent's self-assessed confidence in its own result, plus the reasons a
+    human reviewer might override it — the 'why you might override me' self-critique
+    that supports the human-in-the-loop gates."""
+
+    level: Literal["HIGH", "MEDIUM", "LOW"]
+    rationale: str = Field(description="Why this confidence level (evidence, ambiguity)")
+    caveats: list[str] = Field(
+        default_factory=list,
+        description="Specific reasons a human might reach a different conclusion",
+    )
+
+
+def _default_confidence() -> "Confidence":
+    return Confidence(
+        level="MEDIUM",
+        rationale="AI assessment — a human should confirm at the gate.",
+        caveats=["Confirm against the source evidence before sign-off."],
+    )
+
+
 class AgentOutputBase(BaseModel):
     verdict: Literal["PASS", "WARN", "FAIL"]
     summary: str = Field(description="2-5 sentence executive summary of the result")
     findings: list[Finding]
+    confidence: Confidence = Field(
+        default_factory=_default_confidence,
+        description="The agent's confidence in this result and why a human might override it",
+    )
     release_blocking: bool = Field(
         description="True only for hard-blocking failures (FCA scenarios, "
         "financial data integrity). Enforced server-side regardless."
@@ -331,7 +356,7 @@ class AcComplianceOutput(AgentOutputBase):
     )
     coverage: AcCoverage
     traceability: Traceability
-    confidence: Literal["HIGH", "LOW"] = Field(
+    evidence_confidence: Literal["HIGH", "LOW"] = Field(
         description="HIGH when real change artifacts were analysed, LOW when inferred"
     )
 

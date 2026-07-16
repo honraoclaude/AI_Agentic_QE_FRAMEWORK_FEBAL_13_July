@@ -23,6 +23,7 @@ const ENVELOPE_KEYS = new Set([
   "verdict",
   "summary",
   "findings",
+  "confidence",
   "release_blocking",
   "guidance_applied",
 ]);
@@ -1221,11 +1222,23 @@ function RunOutput({ output }: { output: Record<string, unknown> }) {
     severity: string;
   }>;
   const extras = Object.entries(output).filter(([k]) => !ENVELOPE_KEYS.has(k));
+  const confidence = output.confidence as
+    | { level?: string; rationale?: string; caveats?: string[] }
+    | undefined;
+  const confCls =
+    confidence?.level === "HIGH"
+      ? "border-ok/50 bg-ok/10 text-ok"
+      : confidence?.level === "LOW"
+        ? "border-bad/50 bg-bad/10 text-bad"
+        : "border-warn/50 bg-warn/10 text-warn";
 
   return (
     <div className="flex flex-col gap-3 text-xs">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span className={`font-mono text-sm font-bold ${verdictCls}`}>{verdict}</span>
+        {confidence?.level && (
+          <Badge className={confCls}>◈ confidence {confidence.level}</Badge>
+        )}
         {output.release_blocking === true && (
           <Badge className="border-bad/60 bg-bad/15 text-bad">
             ⛔ Release-blocking — no override
@@ -1233,6 +1246,19 @@ function RunOutput({ output }: { output: Record<string, unknown> }) {
         )}
       </div>
       <p className="leading-relaxed text-ink">{String(output.summary ?? "")}</p>
+
+      {confidence && (
+        <div className="rounded border border-line bg-bg/40 px-2 py-1.5">
+          <span className="text-[11px] text-ink-dim">{confidence.rationale}</span>
+          {(confidence.caveats ?? []).length > 0 && (
+            <ul className="mt-1 list-inside list-disc space-y-0.5 text-[10px] text-ink-faint">
+              {(confidence.caveats ?? []).map((c, i) => (
+                <li key={i}>{c}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {findings.length > 0 && (
         <div>

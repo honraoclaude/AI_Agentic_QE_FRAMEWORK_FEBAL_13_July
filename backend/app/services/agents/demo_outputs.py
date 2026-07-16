@@ -796,7 +796,7 @@ def ac_compliance(story: Story, artifacts=None, upstream=None) -> dict:
             "ac_covered_percent": pct,
         },
         "traceability": traceability,
-        "confidence": "HIGH" if have_meta else "LOW",
+        "evidence_confidence": "HIGH" if have_meta else "LOW",
     }
 
 
@@ -2400,6 +2400,27 @@ GENERATORS = {
 }
 
 
+def _confidence(agent_key: str, body: dict, artifacts, upstream) -> dict:
+    """A self-assessed confidence for every agent: HIGH when the result is grounded
+    in uploaded artifacts / accepted upstream outputs, MEDIUM when inferred from the
+    story alone. `caveats` is the 'why you might override me' self-critique."""
+    has_evidence = bool(artifacts) or bool(upstream)
+    verdict = body.get("verdict")
+    level = "HIGH" if has_evidence else "MEDIUM"
+    if has_evidence:
+        rationale = "Grounded in uploaded artifacts and/or accepted upstream agent outputs."
+        caveats = ["A human should confirm the verdict against the source evidence before the gate."]
+    else:
+        rationale = "Inferred from the story without CI/CD artifacts — indicative only."
+        caveats = [
+            "No CI/CD artifacts were provided; upload them to raise confidence.",
+            "The verdict could change once real scan/test/coverage data is available.",
+        ]
+    if verdict == "FAIL":
+        caveats.insert(0, "A FAIL here reflects available evidence; verify it is not a false positive.")
+    return {"level": level, "rationale": rationale, "caveats": caveats}
+
+
 def build(
     agent_key: str, story: Story, guidance: str | None, artifacts=None, upstream=None
 ) -> dict:
@@ -2409,6 +2430,8 @@ def build(
         body = gen(story, artifacts, upstream)
     else:
         body = gen(story, artifacts)
+    # Every agent carries a self-assessed confidence + "why you might override me".
+    body.setdefault("confidence", _confidence(agent_key, body, artifacts, upstream))
     if guidance:
         # Reflect the reviewer's guidance so the re-run diff view is meaningful.
         body["summary"] = (
