@@ -28,6 +28,8 @@ class ArtifactOut(BaseModel):
     parse_error: str | None
     raw_excerpt: str | None
     uploaded_by: str
+    source: str
+    source_ref: str | None
     created_at: datetime
 
 

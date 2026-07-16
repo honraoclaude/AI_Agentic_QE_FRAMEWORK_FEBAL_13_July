@@ -13,6 +13,10 @@ class Story(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     jira_key: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # Linked Copado User Story (set on first Copado result sighting for the key).
+    copado_user_story_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     summary: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list)

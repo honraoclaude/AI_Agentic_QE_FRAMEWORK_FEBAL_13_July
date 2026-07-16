@@ -10,6 +10,7 @@ from .api import (
     agents,
     artifacts,
     audit,
+    copado,
     demo,
     gates,
     jira,
@@ -97,6 +98,7 @@ app.include_router(settings.router, prefix=API_PREFIX)
 app.include_router(work.router, prefix=API_PREFIX)
 app.include_router(artifacts.router, prefix=API_PREFIX)
 app.include_router(agents.router, prefix=API_PREFIX)
+app.include_router(copado.router, prefix=API_PREFIX)
 app.include_router(demo.router, prefix=API_PREFIX)
 app.include_router(ws.router)
 

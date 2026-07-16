@@ -50,8 +50,11 @@ Legend: 🟢 high value · 🟡 medium · ⚪ nice-to-have · (S/M/L) = effort.
 
 ## 5. Ecosystem depth
 
-- 🟡 **Real Copado integration (M)** — consume pipeline/deployment results as
-  artifacts and gate releases on them.
+- 🟢 **Copado CI/CD integration** — see [COPADO-INTEGRATION.md](COPADO-INTEGRATION.md).
+  - **Phase 1 (in progress): ingest-only** — Copado CodeScan/CRT/Apex/commit
+    results normalise onto existing artifact kinds and feed the agents.
+  - **Phase 2 (planned): gating** — "Copado holds, we release on sign-off"; prod
+    promotion blocked until the human Release gate is signed off, no override.
 - ⚪ **Synthetic FCA-safe test data (M)** — generate anonymised household/account
   fixtures so no real client data is used in testing.
 

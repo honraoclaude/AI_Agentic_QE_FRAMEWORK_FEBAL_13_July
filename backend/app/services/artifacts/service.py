@@ -11,6 +11,64 @@ from ..workflow import NotFoundError
 from . import parsers
 
 
+async def store_artifact(
+    session: AsyncSession,
+    story: Story,
+    *,
+    kind: ArtifactKind,
+    filename: str,
+    content_type: str | None,
+    size_bytes: int,
+    parsed: dict,
+    summary: str,
+    parse_error: str | None,
+    raw_excerpt: str | None,
+    uploaded_by: str,
+    source: str = "MANUAL",
+    source_ref: str | None = None,
+    event_type: str = "ARTIFACT_UPLOADED",
+) -> Artifact:
+    """Persist a (already-parsed) artifact + audit event. Shared by the manual
+    upload path and the Copado ingest path so both behave identically once the
+    payload has been normalised into a `parsed` shape."""
+    artifact = Artifact(
+        story_id=story.id,
+        kind=kind,
+        filename=filename[:256],
+        content_type=content_type,
+        size_bytes=size_bytes,
+        parsed=parsed,
+        summary=summary,
+        parse_error=parse_error,
+        raw_excerpt=raw_excerpt,
+        uploaded_by=uploaded_by or "unknown",
+        source=source,
+        source_ref=source_ref,
+    )
+    session.add(artifact)
+    await session.flush()
+
+    await audit.record_event(
+        session,
+        event_type=event_type,
+        entity_type="artifact",
+        entity_id=artifact.id,
+        actor=uploaded_by or "unknown",
+        payload={
+            "story_id": story.id,
+            "jira_key": story.jira_key,
+            "kind": kind.value,
+            "filename": artifact.filename,
+            "size_bytes": artifact.size_bytes,
+            "summary": artifact.summary,
+            "parse_error": artifact.parse_error,
+            "source": source,
+            "source_ref": source_ref,
+        },
+    )
+    return artifact
+
+
 async def create_artifact(
     session: AsyncSession,
     story_id: str,
@@ -34,38 +92,20 @@ async def create_artifact(
         kind = parsers.detect_kind(filename, text)
 
     result = parsers.parse(kind, text)
-    artifact = Artifact(
-        story_id=story_id,
+    return await store_artifact(
+        session,
+        story,
         kind=kind,
-        filename=filename[:256],
+        filename=filename,
         content_type=content_type,
         size_bytes=len(raw_bytes),
         parsed=result["parsed"],
         summary=result["summary"],
         parse_error=result["error"],
         raw_excerpt=text[: parsers.RAW_EXCERPT_CAP],
-        uploaded_by=uploaded_by or "unknown",
+        uploaded_by=uploaded_by,
+        source="MANUAL",
     )
-    session.add(artifact)
-    await session.flush()
-
-    await audit.record_event(
-        session,
-        event_type="ARTIFACT_UPLOADED",
-        entity_type="artifact",
-        entity_id=artifact.id,
-        actor=uploaded_by or "unknown",
-        payload={
-            "story_id": story_id,
-            "jira_key": story.jira_key,
-            "kind": kind.value,
-            "filename": artifact.filename,
-            "size_bytes": artifact.size_bytes,
-            "summary": artifact.summary,
-            "parse_error": artifact.parse_error,
-        },
-    )
-    return artifact
 
 
 async def list_artifacts(session: AsyncSession, story_id: str) -> list[Artifact]:
@@ -130,6 +170,7 @@ async def gather_for_agent(
             "filename": a.filename,
             "summary": a.summary,
             "parsed": a.parsed,
+            "source": a.source,
         }
         for a in rows
     ]

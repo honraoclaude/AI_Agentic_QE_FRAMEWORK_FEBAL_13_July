@@ -27,9 +27,19 @@ class Settings(BaseSettings):
     sync_enabled: bool = False
     sync_interval_minutes: int = 15
 
+    # Copado CI/CD (ingest — Phase 1). Secrets via .env only.
+    copado_enabled: bool = False
+    copado_base_url: str = ""
+    copado_api_token: str = ""
+    copado_webhook_secret: str = ""
+
     @property
     def jira_configured(self) -> bool:
         return bool(self.jira_base_url and self.jira_email and self.jira_api_token)
+
+    @property
+    def copado_configured(self) -> bool:
+        return bool(self.copado_enabled and self.copado_base_url and self.copado_api_token)
 
 
 @lru_cache

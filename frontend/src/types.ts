@@ -195,6 +195,8 @@ export interface Artifact {
   parse_error: string | null;
   raw_excerpt: string | null;
   uploaded_by: string;
+  source: "MANUAL" | "COPADO";
+  source_ref: string | null;
   created_at: string;
 }
 

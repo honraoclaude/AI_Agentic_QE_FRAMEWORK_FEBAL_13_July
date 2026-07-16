@@ -1,0 +1,141 @@
+"""Copado result normaliser.
+
+Turns a Copado pipeline result payload into one of the platform's *existing*
+normalised artifact shapes, so the agents consume Copado evidence with no
+changes. Pure functions — no I/O, no DB — which keeps them trivially testable
+and runnable in demo mode.
+
+Result types handled:
+  codescan    -> SARIF   (CodeScan SARIF doc, or a Copado violations list)
+  apex_tests  -> JUNIT   (Copado Apex test JSON)
+  crt         -> JUNIT   (Copado Robotic Testing JSON)
+  commit      -> METADATA (User Story committed component list)
+
+Output shape mirrors artifacts.parsers: {kind, filename, parsed, summary,
+parse_error}. Never raises on bad input — returns a parse_error instead.
+"""
+
+from __future__ import annotations
+
+import json
+
+from ...models import ArtifactKind
+from ..artifacts import parsers
+
+# Copado result_type -> (ArtifactKind, default filename stem)
+RESULT_TYPES = {
+    "codescan": (ArtifactKind.SARIF, "codescan"),
+    "apex_tests": (ArtifactKind.JUNIT, "apex-tests"),
+    "crt": (ArtifactKind.JUNIT, "crt-results"),
+    "commit": (ArtifactKind.METADATA, "commit-manifest"),
+}
+
+_PASS = {"pass", "passed", "success", "ok", "true"}
+
+
+def _out(kind: ArtifactKind, filename: str, parsed: dict, summary: str,
+         error: str | None = None) -> dict:
+    return {
+        "kind": kind,
+        "filename": filename,
+        "parsed": parsed,
+        "summary": summary,
+        "parse_error": error,
+    }
+
+
+def _violations_to_sarif(violations: list[dict]) -> dict:
+    """Map a Copado CodeScan violations list into a minimal SARIF doc so the
+    existing SARIF parser produces the shape Static Analysis consumes."""
+    results = []
+    for v in violations:
+        sev = str(v.get("severity") or v.get("priority") or "warning").lower()
+        level = {"1": "error", "2": "error", "high": "error", "critical": "error",
+                 "blocker": "error", "3": "warning", "medium": "warning",
+                 "4": "note", "low": "note", "info": "note"}.get(sev, "warning")
+        uri = v.get("file") or v.get("path") or v.get("component") or ""
+        line = v.get("line") or v.get("startLine")
+        results.append({
+            "ruleId": v.get("rule") or v.get("ruleId") or v.get("category") or "unknown",
+            "level": level,
+            "message": {"text": v.get("message") or v.get("description") or ""},
+            "locations": [{"physicalLocation": {
+                "artifactLocation": {"uri": uri},
+                "region": {"startLine": line} if line else {},
+            }}] if uri else [],
+        })
+    return {"version": "2.1.0", "runs": [{"results": results}]}
+
+
+def _normalise_codescan(payload) -> tuple[dict, str, str | None]:
+    # Already a SARIF doc?
+    if isinstance(payload, dict) and "runs" in payload:
+        r = parsers.parse_sarif(json.dumps(payload))
+        return r["parsed"], r["summary"], r["error"]
+    # Copado violations list (or {"violations": [...]}).
+    violations = payload if isinstance(payload, list) else (payload or {}).get("violations", [])
+    if not isinstance(violations, list):
+        return {}, "Unrecognised CodeScan payload.", "shape"
+    sarif = _violations_to_sarif(violations)
+    r = parsers.parse_sarif(json.dumps(sarif))
+    return r["parsed"], r["summary"], r["error"]
+
+
+def _normalise_tests(payload, label: str) -> tuple[dict, str, str | None]:
+    """Copado Apex / CRT test JSON -> the platform's JUNIT parsed shape."""
+    rows = payload if isinstance(payload, list) else (payload or {}).get("tests", [])
+    if not isinstance(rows, list):
+        return {}, f"Unrecognised {label} payload.", "shape"
+    total = passed = failed = 0
+    failures = []
+    all_tests: list[str] = []
+    for t in rows:
+        name = t.get("name") or t.get("methodName") or t.get("testName") or "test"
+        classname = t.get("className") or t.get("class") or t.get("apexClass") or ""
+        outcome = str(t.get("outcome") or t.get("status") or t.get("result") or "").lower()
+        total += 1
+        all_tests.append(name)
+        if outcome in _PASS:
+            passed += 1
+        else:
+            failed += 1
+            failures.append({
+                "name": name,
+                "classname": classname,
+                "status": "failed",
+                "message": t.get("message") or t.get("stackTrace") or t.get("error") or "",
+            })
+    parsed = {
+        "total": total, "passed": passed, "failed": failed,
+        "errors": 0, "skipped": 0, "failures": failures, "all_tests": all_tests,
+    }
+    summary = f"{total} {label}: {passed} passed, {failed} failed."
+    return parsed, summary, None
+
+
+def _normalise_commit(payload) -> tuple[dict, str, str | None]:
+    # Copado commit gives a component list; parse_metadata already accepts a JSON
+    # list of strings or {type,name} dicts.
+    rows = payload if isinstance(payload, list) else (payload or {}).get("components", [])
+    r = parsers.parse_metadata(json.dumps(rows))
+    return r["parsed"], r["summary"], r["error"]
+
+
+def normalise(result_type: str, payload) -> dict:
+    """Normalise one Copado result. Returns {kind, filename, parsed, summary,
+    parse_error}. Unknown types fall back to GENERIC so nothing 500s."""
+    rt = (result_type or "").strip().lower()
+    entry = RESULT_TYPES.get(rt)
+    if entry is None:
+        r = parsers.parse_generic(json.dumps(payload) if not isinstance(payload, str) else payload)
+        return _out(ArtifactKind.GENERIC, f"copado-{rt or 'result'}.txt",
+                    r["parsed"], r["summary"], r["error"])
+    kind, stem = entry
+    if rt == "codescan":
+        parsed, summary, err = _normalise_codescan(payload)
+    elif rt in ("apex_tests", "crt"):
+        parsed, summary, err = _normalise_tests(payload, "Apex tests" if rt == "apex_tests" else "CRT tests")
+    else:  # commit
+        parsed, summary, err = _normalise_commit(payload)
+    ext = {"SARIF": "sarif", "JUNIT": "xml", "METADATA": "json"}.get(kind.value, "txt")
+    return _out(kind, f"{stem}.{ext}", parsed, summary, err)

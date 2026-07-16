@@ -34,4 +34,8 @@ class Artifact(Base):
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     uploaded_by: Mapped[str] = mapped_column(String(128), default="unknown")
+    # Provenance: MANUAL (uploaded via UI) or COPADO (ingested from a pipeline
+    # event). source_ref carries the origin reference, e.g. "US-1234 @ UAT".
+    source: Mapped[str] = mapped_column(String(16), default="MANUAL")
+    source_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

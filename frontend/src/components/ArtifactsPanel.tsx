@@ -150,11 +150,16 @@ export function ArtifactsPanel({
             >
               <div className="flex items-center gap-2">
                 <Badge className={KIND_CLS[a.kind]}>{a.kind}</Badge>
+                {a.source === "COPADO" && (
+                  <Badge className="border-accent/40 bg-accent/10 text-accent">
+                    ⟳ Copado
+                  </Badge>
+                )}
                 <span className="truncate font-mono text-[11px] text-ink">
                   {a.filename}
                 </span>
                 <span className="ml-auto font-mono text-[10px] text-ink-faint">
-                  {bytes(a.size_bytes)} · {a.uploaded_by} · {fmtTime(a.created_at)}
+                  {bytes(a.size_bytes)} · {a.source === "COPADO" ? (a.source_ref ?? "Copado") : a.uploaded_by} · {fmtTime(a.created_at)}
                 </span>
                 <button
                   onClick={() => remove.mutate(a.id)}
