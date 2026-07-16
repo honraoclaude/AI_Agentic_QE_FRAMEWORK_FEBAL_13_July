@@ -236,6 +236,15 @@ export function StoryDrawer({
                 <div className="ml-auto flex items-center gap-2">
                   <Button
                     variant="ghost"
+                    title="Open the FCA-ready Regulatory Evidence Pack (print to PDF)"
+                    onClick={() =>
+                      window.open(`/api/v1/stories/${storyId}/evidence-pack`, "_blank")
+                    }
+                  >
+                    ⧉ Evidence Pack
+                  </Button>
+                  <Button
+                    variant="ghost"
                     title="Re-pull this story from Jira"
                     busy={refreshMutation.isPending}
                     onClick={() => refreshMutation.mutate()}

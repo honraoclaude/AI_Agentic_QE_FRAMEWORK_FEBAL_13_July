@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,7 +12,7 @@ from ..schemas import (
     StoryBoardOut,
     StoryDetailOut,
 )
-from ..services import referee
+from ..services import evidence_pack, referee
 from ..services.jira import sync_service
 from ..services.jira.factory import get_adapter
 from ..services.ws import manager
@@ -92,6 +93,25 @@ async def story_health(story_id: str, session: AsyncSession = Depends(get_sessio
     if story is None:
         raise HTTPException(status_code=404, detail="story not found")
     return await referee.assess(session, story_id)
+
+
+@router.get("/{story_id}/evidence-pack")
+async def story_evidence_pack(
+    story_id: str,
+    format: str = "html",
+    session: AsyncSession = Depends(get_session),
+):
+    """One-click Regulatory Evidence Pack: gate sign-offs, the AI-governance
+    execution record, regulatory & financial evidence, release-health synthesis
+    and the verified hash-chain. `format=html` (default) renders an auditor-ready,
+    printable document; `format=json` returns the structured pack."""
+    story = await session.get(Story, story_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="story not found")
+    pack = await evidence_pack.assemble(session, story)
+    if format == "json":
+        return pack
+    return HTMLResponse(content=evidence_pack.render_html(pack))
 
 
 @router.get("/{story_id}/timeline", response_model=list[AuditEventOut])
