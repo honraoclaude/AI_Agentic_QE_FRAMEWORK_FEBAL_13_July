@@ -13,6 +13,7 @@ from .api import (
     copado,
     demo,
     gates,
+    github,
     jira,
     push,
     runs,
@@ -99,6 +100,7 @@ app.include_router(work.router, prefix=API_PREFIX)
 app.include_router(artifacts.router, prefix=API_PREFIX)
 app.include_router(agents.router, prefix=API_PREFIX)
 app.include_router(copado.router, prefix=API_PREFIX)
+app.include_router(github.router, prefix=API_PREFIX)
 app.include_router(demo.router, prefix=API_PREFIX)
 app.include_router(ws.router)
 

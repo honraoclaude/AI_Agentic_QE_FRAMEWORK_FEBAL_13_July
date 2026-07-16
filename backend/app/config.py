@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     copado_api_token: str = ""
     copado_webhook_secret: str = ""
 
+    # GitHub branch ingestion. Secrets via .env only.
+    github_enabled: bool = False
+    github_api_url: str = "https://api.github.com"
+    github_token: str = ""
+
     @property
     def jira_configured(self) -> bool:
         return bool(self.jira_base_url and self.jira_email and self.jira_api_token)
@@ -40,6 +45,10 @@ class Settings(BaseSettings):
     @property
     def copado_configured(self) -> bool:
         return bool(self.copado_enabled and self.copado_base_url and self.copado_api_token)
+
+    @property
+    def github_configured(self) -> bool:
+        return bool(self.github_enabled and self.github_token)
 
 
 @lru_cache

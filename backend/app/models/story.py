@@ -17,6 +17,9 @@ class Story(Base):
     copado_user_story_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    # Linked GitHub branch (owner/repo + branch) for source/CI ingestion.
+    github_repo: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    github_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     summary: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list)

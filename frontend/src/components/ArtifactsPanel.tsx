@@ -155,11 +155,16 @@ export function ArtifactsPanel({
                     ⟳ Copado
                   </Badge>
                 )}
+                {a.source === "GITHUB" && (
+                  <Badge className="border-accent/40 bg-accent/10 text-accent">
+                    ⎇ GitHub
+                  </Badge>
+                )}
                 <span className="truncate font-mono text-[11px] text-ink">
                   {a.filename}
                 </span>
                 <span className="ml-auto font-mono text-[10px] text-ink-faint">
-                  {bytes(a.size_bytes)} · {a.source === "COPADO" ? (a.source_ref ?? "Copado") : a.uploaded_by} · {fmtTime(a.created_at)}
+                  {bytes(a.size_bytes)} · {a.source !== "MANUAL" ? (a.source_ref ?? a.source) : a.uploaded_by} · {fmtTime(a.created_at)}
                 </span>
                 <button
                   onClick={() => remove.mutate(a.id)}
