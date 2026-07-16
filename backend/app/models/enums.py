@@ -106,6 +106,26 @@ AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
     "defect_triage": ["test_execution_analyst"],
     "post_deploy_verification": ["bdd_generator"],
     "release_notes": ["bdd_generator", "ac_compliance"],
+    # Release synthesis agents — grounded in the accepted results of the pipeline.
+    "release_readiness": [
+        "ac_compliance", "apex_coverage", "static_analysis", "code_review",
+        "deployability_validation", "test_execution_analyst",
+        "financial_data_integrity", "regression_scope", "security_dast",
+    ],
+    "uat_signoff_coordinator": ["fca_regulatory_impact"],
+    "regulatory_audit_trail": [
+        "fca_regulatory_impact", "consumer_duty_mapper",
+        "financial_data_integrity", "test_execution_analyst", "security_dast",
+    ],
+    "deployment_risk": [
+        "financial_data_integrity", "test_execution_analyst", "security_dast",
+        "apex_coverage", "static_analysis", "regression_scope", "deployability_validation",
+    ],
+    "change_management": [
+        "financial_data_integrity", "test_execution_analyst",
+        "security_dast", "deployability_validation",
+    ],
+    "monitoring_hypercare": ["security_dast", "apex_coverage", "integration_e2e_journey"],
 }
 
 

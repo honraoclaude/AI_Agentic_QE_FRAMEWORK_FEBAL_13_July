@@ -12,6 +12,7 @@ from app.services.agents.output_schemas import (
     MonitoringHypercareOutput,
     PostDeployVerificationOutput,
     ReleaseNotesOutput,
+    ReleaseReadinessOutput,
 )
 from app.services.agents.registry import agents_for_phase
 
@@ -85,6 +86,53 @@ def test_release_notes_from_metadata_and_acs():
     assert parsed.changes and parsed.acceptance_criteria_delivered
     assert parsed.version.startswith("WLTH-101")
     assert parsed.release_blocking is False
+
+
+def _up(agent_key, verdict, blocking=False, **extra):
+    out = {"verdict": verdict, "release_blocking": blocking,
+           "confidence": {"level": "HIGH", "rationale": "x", "caveats": []},
+           "summary": f"{agent_key} says {verdict}", **extra}
+    return {"agent_key": agent_key, "agent_name": agent_key, "output": out}
+
+
+def test_release_readiness_grounded_in_upstream():
+    # A failing (blocking) financial result + a warning coverage result.
+    upstream = [
+        _up("ac_compliance", "PASS"),
+        _up("apex_coverage", "WARN", deployable=True, gate_passed=False),
+        _up("financial_data_integrity", "FAIL", blocking=True),
+        _up("test_execution_analyst", "PASS"),
+    ]
+    body = build("release_readiness", _story(), None, artifacts=[], upstream=upstream)
+    parsed = ReleaseReadinessOutput.model_validate(body)
+    # Grounded: the blocking financial result drives FAIL and shows in evidence gaps.
+    assert parsed.verdict == "FAIL"
+    fin = [c for c in parsed.checklist if "Financial" in c.item]
+    assert fin and fin[0].status == "INCOMPLETE"
+    assert any("financial_data_integrity" in g for g in parsed.evidence_gaps)
+
+
+def test_deployment_risk_grounded_no_go_on_blocker():
+    from app.services.agents.output_schemas import DeploymentRiskOutput
+    upstream = [
+        _up("financial_data_integrity", "FAIL", blocking=True),
+        _up("test_execution_analyst", "PASS"),
+        _up("apex_coverage", "PASS", deployable=True, gate_passed=True),
+    ]
+    body = build("deployment_risk", _story("HIGH"), None, artifacts=[], upstream=upstream)
+    parsed = DeploymentRiskOutput.model_validate(body)
+    assert parsed.recommendation == "NO_GO" and parsed.verdict == "FAIL"
+    assert any(f.status == "BLOCKER" and "Financial" in f.factor for f in parsed.factors)
+
+
+def test_release_readiness_all_green():
+    upstream = [_up(k, "PASS") for k in
+                ("ac_compliance", "apex_coverage", "static_analysis",
+                 "test_execution_analyst", "financial_data_integrity", "regression_scope")]
+    body = build("release_readiness", _story(), None, artifacts=[], upstream=upstream)
+    parsed = ReleaseReadinessOutput.model_validate(body)
+    assert parsed.verdict == "PASS"
+    assert all(c.status == "COMPLETE" for c in parsed.checklist)
 
 
 def test_monitoring_hypercare_flags_missing():

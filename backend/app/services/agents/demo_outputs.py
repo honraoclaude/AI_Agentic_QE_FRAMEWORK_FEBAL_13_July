@@ -52,6 +52,44 @@ def _upstream_output(upstream: list[dict] | None, agent_key: str) -> dict | None
     return None
 
 
+def _pipeline_summary(upstream: list[dict] | None) -> dict:
+    """Summarise the accepted upstream agent outputs a Release agent is grounded
+    in — so Release outputs reflect the *actual* run, not a template."""
+    items = []
+    for u in upstream or []:
+        o = u.get("output") or {}
+        if not o:
+            continue
+        items.append({
+            "key": u.get("agent_key"),
+            "name": u.get("agent_name") or u.get("agent_key"),
+            "verdict": o.get("verdict"),
+            "blocking": bool(o.get("release_blocking")),
+            "confidence": (o.get("confidence") or {}).get("level"),
+            "summary": o.get("summary", ""),
+            "output": o,
+        })
+    verdicts = {"PASS": 0, "WARN": 0, "FAIL": 0}
+    for it in items:
+        if it["verdict"] in verdicts:
+            verdicts[it["verdict"]] += 1
+    return {
+        "items": items,
+        "count": len(items),
+        "verdicts": verdicts,
+        "blockers": [it for it in items if it["blocking"]],
+        "fails": [it for it in items if it["verdict"] == "FAIL"],
+        "warns": [it for it in items if it["verdict"] == "WARN"],
+    }
+
+
+def _find_item(items: list[dict], key: str) -> dict | None:
+    for it in items:
+        if it["key"] == key:
+            return it
+    return None
+
+
 # --- Phase 1: Refinement (no artifact consumers) -------------------------
 
 
@@ -2092,31 +2130,80 @@ def test_data_management(story: Story, artifacts=None) -> dict:
 # --- Phase 4: Release (no artifact consumers) ---------------------------
 
 
-def release_readiness(story: Story, artifacts=None) -> dict:
+def release_readiness(story: Story, artifacts=None, upstream=None) -> dict:
+    ps = _pipeline_summary(upstream)
+    if ps["count"] == 0:
+        return {
+            "verdict": "WARN",
+            "summary": (
+                f"{story.jira_key}: no upstream agent results available — readiness is "
+                "indicative only. Run the Development & Testing agents to ground this."
+            ),
+            "findings": [],
+            "release_blocking": False,
+            "checklist": [
+                {"item": "Development & Testing agents accepted", "status": "INCOMPLETE",
+                 "notes": "No accepted upstream results yet"},
+            ],
+            "evidence_gaps": ["No upstream evidence — run the pipeline first."],
+        }
+
+    items = ps["items"]
+
+    def _status(ok: bool) -> str:
+        return "COMPLETE" if ok else "INCOMPLETE"
+
+    checklist = []
+    specs = [
+        ("ac_compliance", "Acceptance criteria traced"),
+        ("apex_coverage", "Apex coverage gate met"),
+        ("static_analysis", "No open HIGH/CRITICAL static issues"),
+        ("code_review", "Code review approved"),
+        ("deployability_validation", "Change set deploys"),
+        ("test_execution_analyst", "Zero open FCA-scenario failures"),
+        ("financial_data_integrity", "Financial data integrity reconciled"),
+        ("regression_scope", "Regression scope executed"),
+        ("security_dast", "Security (DAST) clear"),
+    ]
+    for key, label in specs:
+        it = _find_item(items, key)
+        if not it:
+            continue
+        ok = it["verdict"] != "FAIL" and not it["blocking"]
+        checklist.append({"item": label, "status": _status(ok), "notes": it["summary"][:90]})
+
+    incomplete = [c for c in checklist if c["status"] == "INCOMPLETE"]
+    evidence_gaps = [f"{it['name']}: {it['summary'][:100]}" for it in ps["fails"] + ps["warns"]]
+    verdict = "FAIL" if ps["blockers"] else ("WARN" if incomplete else "PASS")
     return {
-        "verdict": "WARN",
+        "verdict": verdict,
         "summary": (
-            f"{story.jira_key} is close to release-ready; Apex coverage is the one "
-            "outstanding item. All FCA and financial checks are green."
+            f"{story.jira_key} readiness from {ps['count']} accepted agent result(s): "
+            f"{ps['verdicts']['PASS']} pass / {ps['verdicts']['WARN']} warn / "
+            f"{ps['verdicts']['FAIL']} fail. "
+            + (f"{len(ps['blockers'])} release-blocker(s): "
+               + ", ".join(b["name"] for b in ps["blockers"]) + "."
+               if ps["blockers"]
+               else ("Outstanding: " + ", ".join(c["item"] for c in incomplete) + "."
+                     if incomplete else "All checks green — release-ready."))
         ),
-        "findings": [],
-        "release_blocking": False,
-        "checklist": [
-            {"item": "Gate 1 — Refinement signed off", "status": "COMPLETE", "notes": "PO + QE"},
-            {"item": "Gate 2 — Development signed off", "status": "COMPLETE", "notes": "Tech Lead"},
-            {"item": "AC coverage confirmed", "status": "COMPLETE", "notes": "All criteria mapped"},
-            {"item": "Apex coverage >= 85%", "status": "INCOMPLETE", "notes": "Merge drafted tests"},
-            {"item": "No open HIGH/CRITICAL static issues", "status": "COMPLETE", "notes": "Currency typing fixed"},
-            {"item": "Zero open FCA-scenario failures", "status": "COMPLETE", "notes": "None"},
-            {"item": "Financial data integrity passed", "status": "COMPLETE", "notes": "Checks reconcile"},
-            {"item": "Regression scope executed", "status": "COMPLETE", "notes": "Targeted suite green"},
+        "findings": [
+            {"title": f"Blocking: {b['name']}", "detail": b["summary"], "severity": "HIGH"}
+            for b in ps["blockers"]
         ],
-        "evidence_gaps": ["Apex coverage short of org policy — merge drafted tests"],
+        "release_blocking": False,
+        "checklist": checklist,
+        "evidence_gaps": evidence_gaps,
     }
 
 
-def uat_signoff_coordinator(story: Story, artifacts=None) -> dict:
-    high = story.fca_impact is None or story.fca_impact.value == "HIGH"
+def uat_signoff_coordinator(story: Story, artifacts=None, upstream=None) -> dict:
+    # Ground the FCA impact in the actual assessment when available.
+    fca_out = _upstream_output(upstream, "fca_regulatory_impact")
+    impact = (fca_out or {}).get("proposed_fca_impact") if fca_out else None
+    if impact is None:
+        impact = _fca(story).split()[0]
+    high = impact == "HIGH"
     approvals = [
         {"role": "Product Owner", "required_because": "Always required for UAT sign-off"},
         {"role": "Business Stakeholder", "required_because": "Always required — affected business function"},
@@ -2145,45 +2232,101 @@ def uat_signoff_coordinator(story: Story, artifacts=None) -> dict:
     }
 
 
-def regulatory_audit_trail(story: Story, artifacts=None) -> dict:
+def regulatory_audit_trail(story: Story, artifacts=None, upstream=None) -> dict:
+    ps = _pipeline_summary(upstream)
+    fin = _find_item(ps["items"], "financial_data_integrity")
+    te = _find_item(ps["items"], "test_execution_analyst")
+    sec = _find_item(ps["items"], "security_dast")
+    cd = _find_item(ps["items"], "consumer_duty_mapper")
+
+    def _phrase(it, ok_text, bad_text):
+        if not it:
+            return "not assessed in this run"
+        return bad_text if (it["verdict"] == "FAIL" or it["blocking"]) else ok_text
+
+    reg_evidence = (
+        f"FCA-scenario tests: {_phrase(te, 'passed with no open FCA failure', 'have OPEN FCA-scenario failures')}; "
+        f"financial data integrity: {_phrase(fin, 'reconciled within tolerance', 'has FAILED checks')}; "
+        f"security (DAST): {_phrase(sec, 'no critical/high findings', 'has HIGH/CRITICAL findings')}. "
+        "Release-blocking rules held with no override."
+    )
+    cd_text = (cd["summary"][:200] if cd else "Consumer Duty not assessed in this run.")
+    completeness = ps["count"] > 0 and not ps["fails"] and not ps["blockers"]
     return {
-        "verdict": "PASS",
+        "verdict": "WARN" if (ps["fails"] or ps["blockers"]) else "PASS",
         "summary": (
-            f"Release audit narrative drafted for {story.jira_key}. All sections are "
-            "supported by the platform's hash-chained evidence pack."
+            f"Release audit narrative for {story.jira_key}, derived from "
+            f"{ps['count']} accepted agent result(s). "
+            + ("All regulatory evidence is green." if completeness
+               else f"{len(ps['fails'])} failing / {len(ps['blockers'])} blocking result(s) recorded.")
         ),
         "findings": [],
         "release_blocking": False,
         "report_sections": [
             {"section": "Change summary", "content": f"{story.summary} — FCA impact {_fca(story)}, {_cloud(story)}."},
-            {"section": "Control execution", "content": "Four-gate HITL process executed: each agent explicitly approved and accepted by a named user; each gate signed with rationale."},
-            {"section": "Regulatory testing evidence", "content": "FCA-scenario suite passed; financial data integrity reconciled; release-blocking rules held with no override."},
-            {"section": "Approvals", "content": "PO, Business Stakeholder and Compliance Officer sign-offs collected per the HIGH-impact UAT policy."},
-            {"section": "Traceability", "content": "Every step is a hash-chained append-only audit event; the chain verifies and the evidence pack is attached to the release ticket."},
+            {"section": "Control execution", "content":
+                f"Four-gate HITL process executed; {ps['count']} agent result(s) explicitly "
+                "approved and accepted by named users; each gate signed with rationale."},
+            {"section": "Regulatory testing evidence", "content": reg_evidence},
+            {"section": "Consumer Duty", "content": cd_text},
+            {"section": "Traceability", "content":
+                "Every step is a hash-chained append-only audit event; the chain verifies "
+                "and the evidence pack is attached to the release ticket."},
         ],
-        "completeness_confirmed": True,
+        "completeness_confirmed": completeness,
     }
 
 
-def deployment_risk(story: Story, artifacts=None) -> dict:
+def deployment_risk(story: Story, artifacts=None, upstream=None) -> dict:
     meta = _parsed(artifacts, "METADATA")
     components = (meta or {}).get("components", []) if meta else []
     fca = _fca(story).split()[0]
     high_impact = fca == "HIGH"
-    factors = [
-        {"factor": "FCA / regulatory impact", "impact": "HIGH" if high_impact else "MEDIUM",
-         "status": "CONCERN" if high_impact else "OK",
-         "note": f"Story FCA impact {fca}; client-facing financial figure in scope."},
-        {"factor": "Financial data integrity", "impact": "HIGH", "status": "OK",
-         "note": "Reconciliation passed; no release-blocking financial failure."},
-        {"factor": "Test & coverage status", "impact": "MEDIUM", "status": "CONCERN",
-         "note": "Apex coverage on new code near the floor — watch post-deploy."},
-        {"factor": "Blast radius", "impact": "MEDIUM" if components else "LOW", "status": "OK",
-         "note": f"{len(components) or 'few'} changed component(s), isolated to rollup logic."},
-    ]
+    ps = _pipeline_summary(upstream)
+
+    if ps["count"]:
+        # Grounded: each factor derives from an actual accepted agent verdict.
+        def _factor(label, key, impact):
+            it = _find_item(ps["items"], key)
+            if not it:
+                return None
+            status = ("BLOCKER" if it["blocking"] else
+                      "CONCERN" if it["verdict"] in ("FAIL", "WARN") else "OK")
+            return {"factor": label, "impact": impact, "status": status, "note": it["summary"][:130]}
+
+        factors = [f for f in [
+            _factor("Financial data integrity", "financial_data_integrity", "HIGH"),
+            _factor("FCA scenario tests", "test_execution_analyst", "HIGH"),
+            _factor("Security (DAST)", "security_dast", "HIGH"),
+            _factor("Apex coverage", "apex_coverage", "MEDIUM"),
+            _factor("Static analysis", "static_analysis", "MEDIUM"),
+            _factor("Regression scope", "regression_scope", "MEDIUM"),
+            _factor("Deployability", "deployability_validation", "MEDIUM"),
+        ] if f]
+        factors.append({
+            "factor": "FCA / regulatory impact",
+            "impact": "HIGH" if high_impact else "MEDIUM",
+            "status": "CONCERN" if high_impact else "OK",
+            "note": f"Story FCA impact {fca}.",
+        })
+        factors.append({
+            "factor": "Blast radius", "impact": "MEDIUM" if components else "LOW", "status": "OK",
+            "note": f"{len(components) or 'few'} changed component(s).",
+        })
+    else:
+        factors = [
+            {"factor": "FCA / regulatory impact", "impact": "HIGH" if high_impact else "MEDIUM",
+             "status": "CONCERN" if high_impact else "OK",
+             "note": f"Story FCA impact {fca}; client-facing financial figure in scope."},
+            {"factor": "Test & coverage status", "impact": "MEDIUM", "status": "CONCERN",
+             "note": "No upstream agent results — indicative only; run the pipeline to ground this."},
+            {"factor": "Blast radius", "impact": "MEDIUM" if components else "LOW", "status": "OK",
+             "note": f"{len(components) or 'few'} changed component(s)."},
+        ]
+
     concerns = [f for f in factors if f["status"] == "CONCERN"]
     blockers = [f for f in factors if f["status"] == "BLOCKER"]
-    score = min(100, 20 + 25 * len(concerns) + 50 * len(blockers))
+    score = min(100, 20 + 20 * len(concerns) + 50 * len(blockers))
     if blockers:
         rec, level, verdict = "NO_GO", "HIGH", "FAIL"
     elif concerns:
@@ -2219,11 +2362,19 @@ def deployment_risk(story: Story, artifacts=None) -> dict:
     }
 
 
-def change_management(story: Story, artifacts=None) -> dict:
+def change_management(story: Story, artifacts=None, upstream=None) -> dict:
     meta = _parsed(artifacts, "METADATA")
     components = (meta or {}).get("components", []) if meta else []
     high_impact = _fca(story).split()[0] == "HIGH"
-    change_type = "NORMAL" if high_impact else "STANDARD"
+    ps = _pipeline_summary(upstream)
+    # Risk category grounded in the actual run: blockers/failures escalate it.
+    if ps["blockers"] or ps["fails"]:
+        risk_category = "HIGH"
+    elif high_impact or ps["warns"]:
+        risk_category = "MEDIUM" if not high_impact else "HIGH"
+    else:
+        risk_category = "LOW"
+    change_type = "NORMAL" if high_impact or risk_category == "HIGH" else "STANDARD"
     approvers = [
         {"role": "Product Owner", "status": "APPROVED"},
         {"role": "Change Manager", "status": "PENDING"},
@@ -2250,7 +2401,7 @@ def change_management(story: Story, artifacts=None) -> dict:
         ],
         "release_blocking": False,
         "change_type": change_type,
-        "risk_category": "HIGH" if high_impact else "MEDIUM",
+        "risk_category": risk_category,
         "affected_services": ["FSC household rollup", "Sales person-account sync"]
         + (["Marketing journeys"] if len(components) > 2 else []),
         "proposed_window": "Sat 22:00–23:00 (outside market hours, no month-end)",
@@ -2339,7 +2490,8 @@ def release_notes(story: Story, artifacts=None, upstream=None) -> dict:
     }
 
 
-def monitoring_hypercare(story: Story, artifacts=None) -> dict:
+def monitoring_hypercare(story: Story, artifacts=None, upstream=None) -> dict:
+    ps = _pipeline_summary(upstream)
     dashboards = [
         {"name": "Household rollup health", "detail": "Recalc volume, latency, failure rate", "status": "READY"},
         {"name": "FSC→Sales sync", "detail": "Sync throughput and error rate", "status": "READY"},
@@ -2354,6 +2506,20 @@ def monitoring_hypercare(story: Story, artifacts=None) -> dict:
         {"name": "Recalculation latency", "detail": "p95 < 5s", "status": "READY"},
         {"name": "Portal availability", "detail": "99.9%", "status": "READY"},
     ]
+    # Grounded: add targeted monitors for the areas the pipeline flagged.
+    sec = _find_item(ps["items"], "security_dast")
+    cov = _find_item(ps["items"], "apex_coverage")
+    e2e = _find_item(ps["items"], "integration_e2e_journey")
+    if sec and sec["output"].get("risk_rating") in ("HIGH", "CRITICAL"):
+        alerts.append({"name": "Portal auth/access anomalies", "detail":
+                       "elevated 401/403 or IDOR pattern (DAST flagged HIGH)", "status": "MISSING"})
+    if cov and (cov["verdict"] == "FAIL" or not cov["output"].get("gate_passed", True)):
+        alerts.append({"name": "New-code error rate", "detail":
+                       "watch closely — coverage gate did not pass", "status": "MISSING"})
+    if e2e and e2e["verdict"] == "FAIL":
+        dashboards.append({"name": "Cross-cloud journey health", "detail":
+                           "FSC→Sales→Marketing E2E (a journey failed in test)", "status": "MISSING"})
+
     missing = [x["name"] for x in dashboards + alerts if x["status"] == "MISSING"]
     verdict = "WARN" if missing else "PASS"
     return {

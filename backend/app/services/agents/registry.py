@@ -283,9 +283,11 @@ AGENTS: dict[str, AgentDefinition] = {
             sequence=1,
             pact=("Collaborative",),
             purpose=(
-                "Compiles the evidence pack: gate history, coverage, defect "
-                "status, FCA scenario results."
+                "Compiles the readiness checklist grounded in the actual accepted "
+                "results of the Development & Testing agents — coverage, defects, "
+                "FCA-scenario and financial outcomes — with the evidence gaps."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="uat_signoff_coordinator",
@@ -296,8 +298,9 @@ AGENTS: dict[str, AgentDefinition] = {
             purpose=(
                 "Coordinates the business demo sign-off: tracks the required "
                 "approvers — PO + Business stakeholder always; + Compliance Officer "
-                "when FCA impact = HIGH."
+                "when the assessed FCA impact = HIGH."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="regulatory_audit_trail",
@@ -306,9 +309,11 @@ AGENTS: dict[str, AgentDefinition] = {
             sequence=3,
             pact=("Proactive",),
             purpose=(
-                "Generates the immutable release audit report (who approved "
-                "what, when, with what evidence)."
+                "Generates the immutable release audit report grounded in the actual "
+                "accepted results (who approved what, with what evidence; the real "
+                "FCA / financial / security outcomes)."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="deployment_risk",
@@ -320,8 +325,9 @@ AGENTS: dict[str, AgentDefinition] = {
                 "Aggregates gate results, coverage, open defects and change "
                 "blast-radius into a risk-scored GO / CONDITIONAL_GO / NO_GO "
                 "recommendation with the specific risk factors and any conditions — "
-                "turning the readiness evidence into an explicit, defensible decision."
+                "each factor grounded in an actual accepted agent result."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="change_management",
@@ -331,10 +337,11 @@ AGENTS: dict[str, AgentDefinition] = {
             pact=("Collaborative",),
             purpose=(
                 "Assembles the ITIL change record for the CAB: change type, risk "
-                "category, affected services, proposed window with change-freeze "
-                "check, and the approver matrix — the formal change-control layer "
-                "above UAT sign-off."
+                "category (grounded in the actual accepted results), affected "
+                "services, proposed window with change-freeze check, and the approver "
+                "matrix — the formal change-control layer above the sign-off."
             ),
+            prompt_version="v2",
         ),
         AgentDefinition(
             key="post_deploy_verification",
@@ -368,9 +375,11 @@ AGENTS: dict[str, AgentDefinition] = {
             pact=("Proactive",),
             purpose=(
                 "Confirms the dashboards, alerts/SLOs and support runbook are in "
-                "place before go-live, and defines the hypercare window and on-call — "
-                "so the release is observable and supportable from minute one."
+                "place before go-live — with alerts/SLOs targeted at what the "
+                "pipeline actually flagged — and defines the hypercare window and "
+                "on-call, so the release is observable and supportable from minute one."
             ),
+            prompt_version="v2",
         ),
     ]
 }
