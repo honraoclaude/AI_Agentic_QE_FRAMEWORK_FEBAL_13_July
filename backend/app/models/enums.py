@@ -77,6 +77,10 @@ AGENT_ARTIFACT_KINDS: dict[str, list[ArtifactKind]] = {
     "test_execution_analyst": [ArtifactKind.JUNIT],
     "financial_data_integrity": [ArtifactKind.FINANCIAL],
     "regression_scope": [ArtifactKind.METADATA],
+    "integration_e2e_journey": [ArtifactKind.JUNIT, ArtifactKind.METADATA],
+    "defect_triage": [ArtifactKind.JUNIT],
+    "security_dast": [ArtifactKind.SARIF, ArtifactKind.METADATA],
+    "test_data_management": [ArtifactKind.METADATA],
 }
 
 # Which agents consume the accepted output of upstream agents on the same
@@ -93,6 +97,9 @@ AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
     "test_execution_analyst": ["bdd_generator"],
     "financial_data_integrity": ["bdd_generator"],
     "regression_scope": ["bdd_generator"],
+    "integration_e2e_journey": ["bdd_generator", "regression_scope"],
+    "defect_triage": ["test_execution_analyst"],
+    "uat_test_design": ["bdd_generator", "compliance_ac_advisor"],
 }
 
 

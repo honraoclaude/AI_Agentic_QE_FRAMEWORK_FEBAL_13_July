@@ -1821,6 +1821,266 @@ def regression_scope(story: Story, artifacts=None, upstream=None) -> dict:
     }
 
 
+def integration_e2e_journey(story: Story, artifacts=None, upstream=None) -> dict:
+    junit = _parsed(artifacts, "JUNIT")
+    note = _artifact_note(artifacts, "JUNIT")
+    failed = int((junit or {}).get("failed", 0)) if junit else 0
+    journeys = [
+        {
+            "name": "New household onboarding rolls up to client balance",
+            "clouds": ["FSC", "SALES"],
+            "steps": [
+                "Create household in FSC",
+                "Add active + closed financial accounts",
+                "Person-account sync fires to Sales",
+                "Household total recalculates and displays",
+            ],
+            "integration_points": ["FSC→Sales person-account sync", "Rollup trigger"],
+            "status": "FAIL" if failed else "PASS",
+            "risk": "HIGH",
+            "notes": "Financial figure crosses the FSC→Sales boundary." if not failed
+            else "Rollup did not reconcile after sync — cross-cloud defect.",
+        },
+        {
+            "name": "Household change triggers a Marketing journey",
+            "clouds": ["FSC", "MARKETING"],
+            "steps": [
+                "Update household composition in FSC",
+                "Consent + eligibility evaluated",
+                "Marketing Cloud journey enrolment",
+            ],
+            "integration_points": ["FSC→Marketing enrolment", "Consent check"],
+            "status": "NOT_RUN",
+            "risk": "MEDIUM",
+            "notes": "No consent/journey change in this story — smoke only.",
+        },
+    ]
+    covered = sum(1 for j in journeys if j["status"] in ("PASS", "FAIL"))
+    total = sum(len(j["integration_points"]) for j in journeys)
+    verdict = "FAIL" if failed else ("WARN" if any(j["status"] == "NOT_RUN" for j in journeys) else "PASS")
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"{len(journeys)} cross-cloud journey(s){note}: "
+            + ", ".join(f"{j['name'][:32]}… {j['status']}" for j in journeys)
+        ),
+        "findings": [
+            {"title": f"E2E journey failed: {j['name']}", "detail": j["notes"], "severity": "HIGH"}
+            for j in journeys if j["status"] == "FAIL"
+        ],
+        "release_blocking": False,
+        "journeys": journeys,
+        "covered_integration_points": covered,
+        "total_integration_points": total,
+    }
+
+
+def defect_triage(story: Story, artifacts=None, upstream=None) -> dict:
+    junit = _parsed(artifacts, "JUNIT")
+    te = _upstream_output(upstream, "test_execution_analyst")
+    failures = (junit or {}).get("failures", []) if junit else []
+    total_failures = len(failures) or int((te or {}).get("run_summary", {}).get("failed", 0) or 0)
+
+    clusters = []
+    suggested = []
+    if failures:
+        # Cluster the classic "governor limit under bulk" signature.
+        bulk = [f["name"] for f in failures if "bulk" in (f.get("message", "") + f.get("name", "")).lower()
+                or "soql" in (f.get("message", "")).lower() or "limit" in (f.get("message", "")).lower()]
+        others = [f["name"] for f in failures if f["name"] not in bulk]
+        if bulk:
+            clusters.append({
+                "signature": "System.LimitException: Too many SOQL queries",
+                "tests": bulk,
+                "classification": "PRODUCT_DEFECT",
+                "suspected_root_cause": "SOQL query inside a loop in the rollup recalculation.",
+                "suspected_component": "HouseholdRollupService.recalculate",
+                "severity": "CRITICAL",
+            })
+            suggested.append({
+                "title": "Rollup breaches SOQL governor limit under bulk load",
+                "severity": "CRITICAL",
+                "component": "HouseholdRollupService",
+                "from_cluster": "System.LimitException: Too many SOQL queries",
+                "recommended_action": "Bulkify: move the SOQL outside the loop; add a 200-record test.",
+            })
+        if others:
+            clusters.append({
+                "signature": "UI locator not found",
+                "tests": others,
+                "classification": "TEST_DEFECT",
+                "suspected_root_cause": "Stale selector after a component rename.",
+                "suspected_component": "householdSummary LWC test",
+                "severity": "MINOR",
+            })
+    flaky_count = sum(1 for c in clusters if c["classification"] == "FLAKY")
+    has_product = any(c["classification"] == "PRODUCT_DEFECT" for c in clusters)
+    verdict = "FAIL" if any(c["severity"] in ("BLOCKER", "CRITICAL") and c["classification"] == "PRODUCT_DEFECT" for c in clusters) \
+        else ("WARN" if has_product or clusters else "PASS")
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"{total_failures} failure(s) triaged into {len(clusters)} cluster(s); "
+            f"{len(suggested)} defect(s) suggested."
+            if clusters else "No failures to triage — all tests passing."
+        ),
+        "findings": [
+            {"title": d["title"], "detail": d["recommended_action"], "severity": "HIGH"}
+            for d in suggested
+        ],
+        "release_blocking": False,
+        "clusters": clusters,
+        "suggested_defects": suggested,
+        "total_failures": total_failures,
+        "flaky_count": flaky_count,
+    }
+
+
+def security_dast(story: Story, artifacts=None) -> dict:
+    sarif = _parsed(artifacts, "SARIF")
+    note = _artifact_note(artifacts, "SARIF")
+    findings = []
+    if sarif and sarif.get("findings"):
+        for f in sarif["findings"][:6]:
+            findings.append({
+                "name": f.get("rule", "finding"),
+                "severity": _LEVEL_TO_SEV.get(f.get("level"), "MEDIUM"),
+                "endpoint": f.get("location") or "/portal",
+                "owasp": "A05:2021 Security Misconfiguration",
+                "cwe": None,
+                "evidence": f.get("message") or "",
+                "remediation": "Review and remediate the flagged runtime behaviour.",
+                "confidence": "MEDIUM",
+            })
+    # FSC portal runtime checklist the scanner may not cover.
+    findings.append({
+        "name": "IDOR on client record endpoint",
+        "severity": "HIGH",
+        "endpoint": "/services/apexrest/household/{id}",
+        "owasp": "A01:2021 Broken Access Control",
+        "cwe": "CWE-639",
+        "evidence": "Adviser A could request adviser B's household id and receive data.",
+        "remediation": "Enforce record-level sharing + WITH SECURITY_ENFORCED on the REST handler.",
+        "confidence": "HIGH",
+    })
+    findings.append({
+        "name": "Missing security headers on Experience Cloud portal",
+        "severity": "MEDIUM",
+        "endpoint": "/s/",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "cwe": "CWE-693",
+        "evidence": "No Content-Security-Policy / HSTS on portal responses.",
+        "remediation": "Set CSP, HSTS and X-Content-Type-Options via the CSP settings.",
+        "confidence": "HIGH",
+    })
+    counts = {
+        "critical": sum(1 for f in findings if f["severity"] == "CRITICAL"),
+        "high": sum(1 for f in findings if f["severity"] == "HIGH"),
+        "medium": sum(1 for f in findings if f["severity"] == "MEDIUM"),
+        "low": sum(1 for f in findings if f["severity"] == "LOW"),
+    }
+    if counts["critical"]:
+        risk, verdict = "CRITICAL", "FAIL"
+    elif counts["high"]:
+        risk, verdict = "HIGH", "FAIL"
+    elif counts["medium"]:
+        risk, verdict = "MEDIUM", "WARN"
+    else:
+        risk, verdict = "LOW", "PASS"
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"DAST triage{note or ' (FSC portal checklist)'}: {len(findings)} finding(s), "
+            f"risk {risk} ({counts['high']} high, {counts['medium']} medium)."
+        ),
+        "findings": [
+            {"title": f["name"], "detail": f"{f['endpoint']} — {f['owasp']}", "severity": f["severity"]}
+            for f in findings if f["severity"] in ("HIGH", "CRITICAL")
+        ][:5],
+        "release_blocking": False,
+        "security_findings": findings,
+        "scanned_target": "wealth-portal.example.com (Experience Cloud)",
+        "risk_rating": risk,
+        "counts": counts,
+    }
+
+
+def uat_test_design(story: Story, artifacts=None, upstream=None) -> dict:
+    criteria = _ac(story)
+    cases = []
+    for i, c in enumerate(criteria, 1):
+        cases.append({
+            "id": f"UAT-{story.jira_key}-{i:02d}",
+            "title": f"Verify: {c[:70]}",
+            "persona": "Adviser" if i % 2 else "Paraplanner",
+            "steps": [
+                "Log in to the wealth portal as the persona",
+                "Open the client's household summary",
+                "Perform the action described by the acceptance criterion",
+            ],
+            "expected_result": f"The system behaves per the criterion: {c[:80]}",
+            "ac_ref": c[:80],
+            "priority": "P1" if _is_fca_criterion(c) else "P2",
+        })
+    fca_high = (story.fca_impact.value if story.fca_impact else "HIGH") == "HIGH"
+    roles = ["Product Owner", "Business Stakeholder"] + (["Compliance Officer"] if fca_high else [])
+    return {
+        "verdict": "PASS" if cases else "WARN",
+        "summary": (
+            f"{len(cases)} UAT case(s) designed for {story.jira_key}, covering "
+            f"{len(cases)}/{len(criteria)} acceptance criteria. Sign-off: {', '.join(roles)}."
+        ),
+        "findings": [],
+        "release_blocking": False,
+        "test_cases": cases,
+        "sign_off_roles": roles,
+        "ac_covered": len(cases),
+        "ac_total": len(criteria),
+    }
+
+
+def test_data_management(story: Story, artifacts=None) -> dict:
+    meta = _parsed(artifacts, "METADATA")
+    note = _artifact_note(artifacts, "METADATA")
+    fixtures = [
+        {
+            "name": "Household with mixed-status accounts",
+            "purpose": "Rollup includes active, excludes closed/pending",
+            "records": "1 household + 200 financial accounts (active/closed/pending)",
+            "masking": "SYNTHETIC",
+            "compliance_note": "Fully synthetic — no real client data.",
+        },
+        {
+            "name": "Boundary + rounding balances",
+            "purpose": "GBP rounding (half-up, 2dp) and boundary totals",
+            "records": "12 accounts at rounding boundaries (…005, …004)",
+            "masking": "SYNTHETIC",
+            "compliance_note": "Fully synthetic.",
+        },
+        {
+            "name": "Vulnerable-customer flagged household",
+            "purpose": "Consumer Duty support-path handling",
+            "records": "1 household with a vulnerable-customer marker",
+            "masking": "SYNTHETIC",
+            "compliance_note": "Synthetic marker only; no real vulnerability data.",
+        },
+    ]
+    pii = ["Contact.FirstName/LastName", "Contact.BirthDate", "NationalInsuranceNumber__c",
+           "FinancialAccount.AccountNumber", "Account.BillingAddress"]
+    return {
+        "verdict": "PASS",
+        "summary": (
+            f"{len(fixtures)} synthetic fixture(s) specified for {story.jira_key}{note}; "
+            f"{len(pii)} PII field(s) flagged for synthesis. No real client data required."
+        ),
+        "findings": [],
+        "release_blocking": False,
+        "fixtures": fixtures,
+        "pii_flags": pii,
+        "all_synthetic": True,
+    }
+
+
 # --- Phase 4: Release (no artifact consumers) ---------------------------
 
 
@@ -1912,6 +2172,11 @@ GENERATORS = {
     "test_execution_analyst": test_execution_analyst,
     "financial_data_integrity": financial_data_integrity,
     "regression_scope": regression_scope,
+    "integration_e2e_journey": integration_e2e_journey,
+    "defect_triage": defect_triage,
+    "security_dast": security_dast,
+    "uat_test_design": uat_test_design,
+    "test_data_management": test_data_management,
     "release_readiness": release_readiness,
     "uat_signoff_coordinator": uat_signoff_coordinator,
     "regulatory_audit_trail": regulatory_audit_trail,

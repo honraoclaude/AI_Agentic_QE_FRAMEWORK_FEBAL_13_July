@@ -592,6 +592,132 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       );
     }
 
+    // Integration & E2E journeys: cross-cloud journeys with status.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "clouds" in v &&
+          "integration_points" in v &&
+          "status" in v,
+      )
+    ) {
+      const stCls: Record<string, string> = {
+        PASS: "border-ok/50 bg-ok/10 text-ok",
+        FAIL: "border-bad/50 bg-bad/10 text-bad",
+        BLOCKED: "border-warn/50 bg-warn/10 text-warn",
+        NOT_RUN: "border-line text-ink-faint",
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const j = v as {
+              name: string; clouds: string[]; steps: string[];
+              integration_points: string[]; status: string; risk: string; notes?: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Badge className={stCls[j.status] ?? "border-line text-ink-dim"}>{j.status}</Badge>
+                  <span className="text-[11px] font-medium text-ink">{j.name}</span>
+                  {(j.clouds ?? []).map((c) => (
+                    <span key={c} className="font-mono text-[10px] text-accent">{c}</span>
+                  ))}
+                </div>
+                <div className="text-[10px] text-ink-faint">
+                  seams: {(j.integration_points ?? []).join(" · ")}
+                </div>
+                {j.notes && <div className="mt-0.5 text-[10px] text-ink-dim">{j.notes}</div>}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Security DAST findings.
+    if (
+      value.every(
+        (v) => typeof v === "object" && v !== null && "endpoint" in v && "owasp" in v && "evidence" in v,
+      )
+    ) {
+      const sevCls: Record<string, string> = {
+        CRITICAL: "border-bad/50 bg-bad/10 text-bad",
+        HIGH: "border-bad/50 bg-bad/10 text-bad",
+        MEDIUM: "border-warn/50 bg-warn/10 text-warn",
+        LOW: "border-line text-ink-dim",
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const f = v as {
+              name: string; severity: string; endpoint: string; owasp: string;
+              cwe?: string | null; evidence: string; remediation: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Badge className={sevCls[f.severity] ?? "border-line text-ink-dim"}>{f.severity}</Badge>
+                  <span className="text-[11px] font-medium text-ink">{f.name}</span>
+                  <span className="font-mono text-[10px] text-accent">{f.owasp}</span>
+                  {f.cwe && <span className="font-mono text-[10px] text-ink-faint">{f.cwe}</span>}
+                </div>
+                <div className="font-mono text-[10px] text-ink-faint">{f.endpoint}</div>
+                <div className="text-[11px] text-ink-dim">{f.evidence}</div>
+                <div className="mt-0.5 text-[10px] text-ok">▸ {f.remediation}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Defect triage clusters.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "signature" in v &&
+          "classification" in v &&
+          "suspected_root_cause" in v,
+      )
+    ) {
+      const clsCls: Record<string, string> = {
+        PRODUCT_DEFECT: "border-bad/50 bg-bad/10 text-bad",
+        TEST_DEFECT: "border-warn/50 bg-warn/10 text-warn",
+        ENVIRONMENT: "border-line text-ink-dim",
+        DATA: "border-line text-ink-dim",
+        FLAKY: "border-review/50 text-review",
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const c = v as {
+              signature: string; tests: string[]; classification: string;
+              suspected_root_cause: string; suspected_component: string; severity: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Badge className={clsCls[c.classification] ?? "border-line text-ink-dim"}>
+                    {c.classification.replaceAll("_", " ").toLowerCase()}
+                  </Badge>
+                  <Badge className="border-line text-ink-dim">{c.severity}</Badge>
+                  <span className="font-mono text-[10px] text-ink">{(c.tests ?? []).length} test(s)</span>
+                </div>
+                <div className="font-mono text-[10px] text-bad">{c.signature}</div>
+                <div className="text-[11px] text-ink-dim">
+                  {c.suspected_root_cause} <span className="text-ink-faint">({c.suspected_component})</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // Automated Code Review: categorised review comments with suggestions.
     if (
       value.every(

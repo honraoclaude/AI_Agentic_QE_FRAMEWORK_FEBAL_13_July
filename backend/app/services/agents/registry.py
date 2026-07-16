@@ -223,6 +223,70 @@ AGENTS: dict[str, AgentDefinition] = {
             ),
             prompt_version="v2",
         ),
+        AgentDefinition(
+            key="integration_e2e_journey",
+            name="Integration & E2E Journey Agent",
+            phase=Phase.TESTING,
+            sequence=4,
+            pact=("Targeted", "Collaborative"),
+            purpose=(
+                "Validates the end-to-end journeys that span FSC, Sales and "
+                "Marketing Cloud — the integration seams where cross-cloud defects "
+                "hide — with per-journey status, risk and integration-point coverage."
+            ),
+        ),
+        AgentDefinition(
+            key="defect_triage",
+            name="Defect Triage & Root-Cause Agent",
+            phase=Phase.TESTING,
+            sequence=5,
+            pact=("Autonomous",),
+            purpose=(
+                "Clusters test failures by signature, classifies each "
+                "(product/test/environment/data/flaky), hypothesises a root cause and "
+                "suspected component, and drafts Jira defects with severity — turning "
+                "'what failed' into 'why, and what next'."
+            ),
+        ),
+        AgentDefinition(
+            key="security_dast",
+            name="Security Testing (DAST) Agent",
+            phase=Phase.TESTING,
+            sequence=6,
+            pact=("Proactive",),
+            purpose=(
+                "Triages dynamic application security testing (OWASP ZAP / Burp / "
+                "pen-test) findings against the running app and client portals — the "
+                "runtime complement to Dev-phase SAST — each OWASP/CWE-mapped with a "
+                "risk rating and remediation."
+            ),
+        ),
+        AgentDefinition(
+            key="uat_test_design",
+            name="UAT / Acceptance Test Design Agent",
+            phase=Phase.TESTING,
+            sequence=7,
+            pact=("Collaborative",),
+            purpose=(
+                "Designs business-readable UAT / acceptance test cases from the "
+                "acceptance criteria (persona, steps, expected result, AC trace, "
+                "priority) and the required sign-off roles — feeding the Release UAT "
+                "coordinator."
+            ),
+        ),
+        AgentDefinition(
+            key="test_data_management",
+            name="Test Data Management Agent",
+            phase=Phase.TESTING,
+            sequence=8,
+            pact=("Proactive", "Targeted"),
+            purpose=(
+                "Specifies the compliant test-data fixtures a story needs — synthetic "
+                "or masked household/account data — and flags any field that would "
+                "carry client PII if real data were used, so no real client data "
+                "enters testing (FCA / UK GDPR)."
+            ),
+        ),
         # --- Phase 4: Release ---
         AgentDefinition(
             key="release_readiness",

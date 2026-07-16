@@ -216,7 +216,7 @@ async def test_full_lifecycle_to_release(session, adapter):
     assert story.released is True
     assert story.current_phase == Phase.RELEASE
 
-    # 17 accepted runs (6 Refinement + 5 Development + 3 Testing + 3 Release).
+    # 22 accepted runs (6 Refinement + 5 Development + 8 Testing + 3 Release).
     runs = await _runs_for(session, story.id)
-    assert len(runs) == 17
+    assert len(runs) == 22
     assert all(r.status == RunStatus.ACCEPTED for r in runs)

@@ -743,6 +743,110 @@ class RegressionScopeOutput(AgentOutputBase):
     scope_summary: RegressionSummary
 
 
+# --- Testing: Integration & E2E Journey ----------------------------------
+
+
+class E2EJourney(BaseModel):
+    name: str
+    clouds: list[str] = Field(description="FSC / SALES / MARKETING spanned by the journey")
+    steps: list[str]
+    integration_points: list[str] = Field(description="The seams where systems hand off")
+    status: Literal["PASS", "FAIL", "BLOCKED", "NOT_RUN"]
+    risk: Literal["LOW", "MEDIUM", "HIGH"]
+    notes: str = ""
+
+
+class E2EJourneyOutput(AgentOutputBase):
+    journeys: list[E2EJourney]
+    covered_integration_points: int
+    total_integration_points: int
+
+
+# --- Testing: Defect Triage / Root-Cause ---------------------------------
+
+
+class DefectCluster(BaseModel):
+    signature: str = Field(description="Shared failure signature grouping these tests")
+    tests: list[str]
+    classification: Literal["PRODUCT_DEFECT", "TEST_DEFECT", "ENVIRONMENT", "DATA", "FLAKY"]
+    suspected_root_cause: str
+    suspected_component: str
+    severity: Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+
+
+class TriagedDefect(BaseModel):
+    title: str
+    severity: Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+    component: str
+    from_cluster: str
+    recommended_action: str
+
+
+class DefectTriageOutput(AgentOutputBase):
+    clusters: list[DefectCluster]
+    suggested_defects: list[TriagedDefect]
+    total_failures: int
+    flaky_count: int
+
+
+# --- Testing: UAT / Acceptance Test Design -------------------------------
+
+
+class UatCase(BaseModel):
+    id: str
+    title: str
+    persona: str = Field(description="Business role executing the test, e.g. Adviser")
+    steps: list[str]
+    expected_result: str
+    ac_ref: str = Field(description="The acceptance criterion this validates")
+    priority: Literal["P1", "P2", "P3"]
+
+
+class UatTestDesignOutput(AgentOutputBase):
+    test_cases: list[UatCase]
+    sign_off_roles: list[str]
+    ac_covered: int
+    ac_total: int
+
+
+# --- Testing: Test Data Management ---------------------------------------
+
+
+class DataFixture(BaseModel):
+    name: str
+    purpose: str
+    records: str = Field(description="What/how many records, e.g. '1 household + 200 accounts'")
+    masking: Literal["SYNTHETIC", "MASKED", "ANONYMISED"]
+    compliance_note: str
+
+
+class TestDataOutput(AgentOutputBase):
+    fixtures: list[DataFixture]
+    pii_flags: list[str] = Field(description="Fields that would carry client PII if real data used")
+    all_synthetic: bool = Field(description="True when no real client data is required")
+
+
+# --- Testing: Security Testing (DAST) ------------------------------------
+
+
+class DastFinding(BaseModel):
+    name: str
+    severity: Severity
+    endpoint: str = Field(description="URL / page / API the finding was raised on")
+    owasp: str = Field(description="OWASP category, e.g. A01:2021 Broken Access Control")
+    cwe: str | None = None
+    evidence: str
+    remediation: str
+    confidence: Literal["HIGH", "MEDIUM", "LOW"]
+
+
+class SecurityDastOutput(AgentOutputBase):
+    security_findings: list[DastFinding]
+    scanned_target: str
+    risk_rating: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    counts: dict = Field(description="Findings by severity, e.g. {critical, high, medium, low}")
+
+
 # --- Phase 4: Release ----------------------------------------------------
 
 
@@ -792,6 +896,11 @@ OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "test_execution_analyst": TestExecutionOutput,
     "financial_data_integrity": FinancialIntegrityOutput,
     "regression_scope": RegressionScopeOutput,
+    "integration_e2e_journey": E2EJourneyOutput,
+    "defect_triage": DefectTriageOutput,
+    "uat_test_design": UatTestDesignOutput,
+    "test_data_management": TestDataOutput,
+    "security_dast": SecurityDastOutput,
     "release_readiness": ReleaseReadinessOutput,
     "uat_signoff_coordinator": UatSignoffOutput,
     "regulatory_audit_trail": RegulatoryAuditOutput,
