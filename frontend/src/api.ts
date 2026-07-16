@@ -9,6 +9,7 @@ import type {
   SettingsView,
   StoryBoard,
   StoryDetail,
+  StoryHealth,
   SyncResult,
   WorkQueue,
 } from "./types";
@@ -47,6 +48,7 @@ const post = <T,>(path: string, body?: unknown) =>
 export const api = {
   stories: () => request<StoryBoard[]>("/stories"),
   story: (id: string) => request<StoryDetail>(`/stories/${id}`),
+  health: (id: string) => request<StoryHealth>(`/stories/${id}/health`),
   timeline: (id: string) => request<AuditEvent[]>(`/stories/${id}/timeline`),
   refreshStory: (id: string) => post<StoryDetail>(`/stories/${id}/refresh`),
   gates: (storyId: string) => request<Gate[]>(`/stories/${storyId}/gates`),

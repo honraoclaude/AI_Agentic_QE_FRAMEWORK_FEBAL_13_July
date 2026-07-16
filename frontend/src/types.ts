@@ -183,6 +183,27 @@ export const ARTIFACT_KINDS: ArtifactKind[] = [
   "GENERIC",
 ];
 
+export interface Inconsistency {
+  rule: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  agents: string[];
+  detail: string;
+  recommendation: string;
+}
+
+export interface StoryHealth {
+  score: number | null;
+  band: "HEALTHY" | "AT_RISK" | "CRITICAL" | "BLOCKED" | "NO_DATA";
+  assurance: "HIGH" | "MEDIUM" | "LOW" | null;
+  counts: { pass: number; warn: number; fail: number };
+  phase_breakdown: { phase: string; score: number }[];
+  blockers: { agent: string; phase: string; summary: string }[];
+  least_confident: { agent: string; verdict: string; phase: string }[];
+  agents_evaluated: number;
+  inconsistencies: Inconsistency[];
+  inconsistency_count: number;
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

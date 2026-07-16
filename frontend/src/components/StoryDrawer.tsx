@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { AgentDef, Gate, Phase, Run } from "../types";
+import type { AgentDef, Gate, Phase, Run, StoryHealth } from "../types";
 import { PHASES } from "../types";
 import {
   Badge,
@@ -47,6 +47,80 @@ const EVENT_ICONS: Record<string, string> = {
   PUSH_RETRIED: "↻",
 };
 
+const BAND_META: Record<string, { label: string; cls: string; ring: string }> = {
+  HEALTHY: { label: "Healthy", cls: "text-ok", ring: "border-ok/50 bg-ok/10" },
+  AT_RISK: { label: "At risk", cls: "text-warn", ring: "border-warn/50 bg-warn/10" },
+  CRITICAL: { label: "Critical", cls: "text-bad", ring: "border-bad/50 bg-bad/10" },
+  BLOCKED: { label: "Blocked", cls: "text-bad", ring: "border-bad/60 bg-bad/15" },
+  NO_DATA: { label: "No data", cls: "text-ink-faint", ring: "border-line" },
+};
+const SEV_CLS: Record<string, string> = {
+  HIGH: "border-bad/50 bg-bad/10 text-bad",
+  MEDIUM: "border-warn/50 bg-warn/10 text-warn",
+  LOW: "border-line text-ink-dim",
+};
+
+function HealthCard({ health }: { health: StoryHealth }) {
+  const band = BAND_META[health.band] ?? BAND_META.NO_DATA;
+  return (
+    <section className={`rounded-lg border p-3 ${band.ring}`}>
+      <div className="flex items-center gap-3">
+        <div className={`font-mono text-3xl font-bold ${band.cls}`}>{health.score}</div>
+        <div className="flex flex-col">
+          <span className={`text-sm font-semibold ${band.cls}`}>Release Health · {band.label}</span>
+          <span className="text-[10px] text-ink-faint">
+            {health.agents_evaluated} agents · assurance {health.assurance ?? "—"} ·{" "}
+            {health.counts.pass}✓ {health.counts.warn}▲ {health.counts.fail}✗
+          </span>
+        </div>
+        <div className="ml-auto flex gap-1">
+          {health.phase_breakdown.map((p) => (
+            <div key={p.phase} className="text-center" title={`${p.phase}: ${p.score}`}>
+              <div className="font-mono text-[11px] text-ink">{p.score}</div>
+              <div className="text-[8px] uppercase text-ink-faint">{p.phase.slice(0, 3)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {health.blockers.length > 0 && (
+        <div className="mt-2 rounded border border-bad/40 bg-bad/5 px-2 py-1.5 text-[11px] text-bad">
+          ⛔ {health.blockers.length} release-blocker(s):{" "}
+          {health.blockers.map((b) => b.agent).join(", ")}
+        </div>
+      )}
+
+      {health.inconsistencies.length > 0 && (
+        <div className="mt-2">
+          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+            Cross-agent referee · {health.inconsistency_count} inconsistency(ies)
+          </h4>
+          <ul className="flex flex-col gap-1.5">
+            {health.inconsistencies.map((inc, i) => (
+              <li key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                  <Badge className={SEV_CLS[inc.severity] ?? "border-line text-ink-dim"}>
+                    {inc.severity}
+                  </Badge>
+                  <span className="font-mono text-[10px] text-accent">{inc.agents.join(" ⇄ ")}</span>
+                </div>
+                <div className="text-[11px] text-ink">{inc.detail}</div>
+                <div className="mt-0.5 text-[10px] text-ink-dim">▸ {inc.recommendation}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {health.least_confident.length > 0 && (
+        <div className="mt-2 text-[10px] text-ink-faint">
+          Least confident: {health.least_confident.map((l) => `${l.agent} (${l.verdict})`).join(", ")}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function StoryDrawer({
   storyId,
   actor,
@@ -76,6 +150,11 @@ export function StoryDrawer({
     queryKey: ["timeline", storyId],
     queryFn: () => api.timeline(storyId),
     enabled: tab === "timeline",
+  });
+  const healthQuery = useQuery({
+    queryKey: ["health", storyId],
+    queryFn: () => api.health(storyId),
+    enabled: tab === "runs",
   });
 
   const refreshMutation = useMutation({
@@ -207,6 +286,9 @@ export function StoryDrawer({
             <div className="flex-1 overflow-y-auto px-5 py-4">
               {tab === "runs" && (
                 <div className="flex flex-col gap-5">
+                  {healthQuery.data && healthQuery.data.score !== null && (
+                    <HealthCard health={healthQuery.data} />
+                  )}
                   {PHASES.map((phase) => {
                     const phaseAgents = Array.from(agents.values())
                       .filter((a) => a.phase === phase)

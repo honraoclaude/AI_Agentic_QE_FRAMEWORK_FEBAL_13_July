@@ -11,6 +11,7 @@ from ..schemas import (
     StoryBoardOut,
     StoryDetailOut,
 )
+from ..services import referee
 from ..services.jira import sync_service
 from ..services.jira.factory import get_adapter
 from ..services.ws import manager
@@ -80,6 +81,17 @@ async def story_runs(story_id: str, session: AsyncSession = Depends(get_session)
         .all()
     )
     return runs
+
+
+@router.get("/{story_id}/health")
+async def story_health(story_id: str, session: AsyncSession = Depends(get_session)):
+    """Cross-Agent Referee + Release Health Index: a confidence-weighted health
+    score, per-phase breakdown, active blockers, least-confident calls, and the
+    cross-agent inconsistencies found across all of the story's runs."""
+    story = await session.get(Story, story_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="story not found")
+    return await referee.assess(session, story_id)
 
 
 @router.get("/{story_id}/timeline", response_model=list[AuditEventOut])
