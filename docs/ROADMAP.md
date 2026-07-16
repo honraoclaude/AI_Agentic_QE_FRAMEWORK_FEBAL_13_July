@@ -11,10 +11,11 @@ Legend: 🟢 high value · 🟡 medium · ⚪ nice-to-have · (S/M/L) = effort.
 ## 1. Compliance as a first-class product
 *Exploits the hash-chained audit trail and FCA context — our biggest differentiator.*
 
-- 🟢 **Regulatory Evidence Pack (S–M)** — one-click "Generate Audit Bundle": a
-  timestamped PDF per release compiling gate sign-offs, every agent output +
-  prompt version + token/hash, financial-integrity checks, and the verified
-  audit chain. Turns 7-year retention into a 30-second deliverable.
+- ✅ **SHIPPED — Regulatory Evidence Pack** — one-click auditor-ready HTML
+  document (`GET /stories/{id}/evidence-pack`, print-to-PDF): gate sign-offs,
+  the AI-governance execution record (every agent run + prompt version + model +
+  tokens + output hash), regulatory & financial evidence, release-health
+  synthesis, and the verified hash-chain.
 - 🟡 **Consumer Duty outcome mapping (M)** — tag stories against the four
   Consumer Duty outcomes and score coverage per release.
 - 🟡 **Cryptographic sign-off (M)** — bind each gate sign-off to a signing key
@@ -23,13 +24,43 @@ Legend: 🟢 high value · 🟡 medium · ⚪ nice-to-have · (S/M/L) = effort.
 ## 2. Trustworthy agents
 *Raises confidence in the agentic core — the "trust" in "AI That Tests. Humans Who Trust."*
 
-- 🟢 **Cross-agent Referee / consistency meta-agent (M)** — flags contradictions
-  between agent outputs (e.g. BDD says covered, AC Compliance says not).
-- 🟢 **Agent eval harness + golden dataset (M)** — labelled stories with known
-  outputs, run on every prompt/model change, producing per-agent accuracy
-  metrics over time. Converts "the AI said so" into measured, defensible quality.
-- 🟡 **Confidence + self-critique (S)** — each agent emits a confidence score and
-  a "why you might override me" note; low confidence auto-routes to a human.
+- ✅ **SHIPPED — Cross-Agent Referee + Release Health Index** — a cross-cutting
+  synthesis over all of a story's runs: a confidence-weighted health score + band,
+  per-phase breakdown, and deterministic checks that flag contradictions *between*
+  agents (e.g. GO recommended while Financial Integrity failed). `GET
+  /stories/{id}/health`.
+- ✅ **SHIPPED — Confidence + self-critique** — every agent emits
+  `{level, rationale, caveats}` on the shared envelope; the "why you might override
+  me" caveats support the HITL gates. *(Not yet: auto-routing low confidence to a
+  human — see below.)*
+- ✅ **SHIPPED — Human-feedback loop / agent-performance analytics** — mines the
+  Accept / Reject / Re-run-with-guidance decisions into per-agent trust scores,
+  override rates and reject reasons. `GET /insights/agents` + the Agent Insights
+  tab. Tells us *which agents humans push back on*.
+
+### 📌 PARKED — Agent eval harness + golden dataset (M–L)
+*The measured-accuracy complement to the (shipped) feedback loop. Feedback tells
+us whether humans agree; an eval harness tells us whether an agent is actually
+**right** against an expert-labelled answer key — and catches regressions before
+they ship.*
+
+- **Golden dataset** — per-agent files of `{input, expected}` cases labelled by a
+  compliance/QE expert (e.g. Financial Integrity: a £1.63-discrepancy artifact →
+  expected `verdict FAIL`, `release_blocking true`, `variance 1.63`).
+- **Eval harness** — a runner that executes each agent (the real Claude path) on
+  its golden cases and grades the output: exact-match for structured fields,
+  set-overlap for citations (e.g. FCA Handbook refs), and LLM-as-judge on a rubric
+  for free-text rationale. Produces a per-agent, per-prompt-version accuracy
+  scorecard over time.
+- **Why:** makes prompt versioning (v1→v2→v3) *safe* — regressions fail red
+  before shipping; and turns "the AI said so" into "measured at N% against an
+  expert-labelled test set, re-verified on every change." Gate it in CI.
+- **Cost:** the golden labelling is the real investment (a human defines "correct"
+  for a few dozen cases per agent) — and that labelled set *is* the defensible
+  asset. Start with **Financial Data Integrity** (deterministic, grades cleanly).
+- **Also parked here:** *auto-route low-confidence outputs to a human* — use the
+  shipped `confidence.level` to force a mandatory human review when LOW, rather
+  than letting it flow through on Accept.
 
 ## 3. Proactive intelligence
 *Activates the underused "P" (Proactive) in PACT.*
