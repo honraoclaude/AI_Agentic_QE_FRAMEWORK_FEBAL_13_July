@@ -71,6 +71,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
               automation?: { recommended?: boolean; framework?: string; reason?: string };
               tags?: string[];
               covers?: string[];
+              ac_refs?: string[];
               gherkin: string;
             };
             const auto = sc.automation;
@@ -82,6 +83,11 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
                       {sc.priority}
                     </Badge>
                   )}
+                  {(sc.ac_refs ?? []).map((r) => (
+                    <Badge key={r} className="border-accent/40 bg-accent/10 text-accent">
+                      {r}
+                    </Badge>
+                  ))}
                   {sc.level && (
                     <Badge className="border-line text-ink-dim">{sc.level}</Badge>
                   )}
@@ -144,6 +150,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
         <div className="flex flex-col gap-2">
           {value.map((v, i) => {
             const m = v as {
+              ac_id?: string;
               criterion: string;
               status: string;
               components?: string[];
@@ -157,6 +164,11 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
             return (
               <div key={i} className="rounded border border-line bg-bg/50 p-2">
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  {m.ac_id && (
+                    <Badge className="border-accent/40 bg-accent/10 text-accent">
+                      {m.ac_id}
+                    </Badge>
+                  )}
                   <Badge className={statusCls[m.status] ?? "border-line text-ink-dim"}>
                     {m.status.replace("_", " ").toLowerCase()}
                   </Badge>
@@ -881,6 +893,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
               area: string;
               obligation: string;
               relevance: string;
+              triggered_by?: string;
             };
             return (
               <div key={i} className="rounded border border-line bg-bg/50 p-2">
@@ -889,6 +902,11 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
                     {r.handbook_ref}
                   </Badge>
                   <span className="font-mono text-[10px] text-ink-faint">{r.area}</span>
+                  {r.triggered_by && (
+                    <Badge className="ml-auto border-line text-ink-dim">
+                      ⇠ {r.triggered_by}
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-[11px] text-ink">{r.obligation}</div>
                 <div className="mt-0.5 text-[10px] text-ink-dim">{r.relevance}</div>

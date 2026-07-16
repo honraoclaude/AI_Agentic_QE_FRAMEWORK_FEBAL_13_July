@@ -86,6 +86,11 @@ class ApplicableRegulation(BaseModel):
     area: Literal["COBS", "PRIN", "PROD", "SYSC", "DISP", "SMCR", "ICOBS", "SUP"]
     obligation: str = Field(description="The specific obligation this story must meet")
     relevance: str = Field(description="Why this regulation applies to this story")
+    triggered_by: str = Field(
+        default="",
+        description="Evidence anchor: the acceptance-criterion id (e.g. AC-2) that "
+        "triggers this obligation",
+    )
 
 
 class FcaRegulatoryImpactOutput(AgentOutputBase):
@@ -251,6 +256,10 @@ class BddScenario(BaseModel):
     covers: list[str] = Field(
         description="Rule(s)/acceptance-criteria this scenario satisfies — traceability"
     )
+    ac_refs: list[str] = Field(
+        default_factory=list,
+        description="Evidence anchor: acceptance-criterion ids (e.g. AC-1) this scenario validates",
+    )
     gherkin: str = Field(description="Complete well-formed Gherkin scenario")
 
 
@@ -302,6 +311,7 @@ class AcTestCoverage(BaseModel):
 
 
 class AcMappingItem(BaseModel):
+    ac_id: str = Field(default="", description="Evidence anchor: stable id, e.g. AC-1")
     criterion: str
     status: Literal["COVERED", "PARTIAL", "NOT_COVERED", "NOT_VERIFIABLE"] = Field(
         description="COVERED (evidence exists), PARTIAL (some), NOT_COVERED (gap), "
@@ -659,6 +669,9 @@ class FailureAnalysis(BaseModel):
     is_fca_scenario: bool
     bdd_scenario: str | None = Field(
         default=None, description="The BDD scenario this test maps to, if matched"
+    )
+    ac_ref: str | None = Field(
+        default=None, description="Evidence anchor: the acceptance-criterion id this test validates"
     )
     likely_flaky: bool
     rerun_recommended: bool

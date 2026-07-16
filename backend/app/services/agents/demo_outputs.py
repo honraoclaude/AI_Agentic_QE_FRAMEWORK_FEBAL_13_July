@@ -22,6 +22,23 @@ def _ac(story: Story) -> list[str]:
     return story.acceptance_criteria or ["(no acceptance criteria captured)"]
 
 
+def _ac_items(story: Story) -> list[dict]:
+    """Acceptance criteria with stable ids (AC-1..N) — the traceability anchor
+    threaded through FCA Impact, BDD, AC Compliance and Test Execution."""
+    return [{"id": f"AC-{i}", "text": t} for i, t in enumerate(_ac(story), 1)]
+
+
+def _ac_ref_for(text: str, ac_items: list[dict]) -> str:
+    """Best-effort: the AC id whose words most overlap `text` (else AC-1)."""
+    words = {w for w in text.lower().replace("[fca]", "").split() if len(w) > 4}
+    best, best_id = 0, (ac_items[0]["id"] if ac_items else "")
+    for it in ac_items:
+        overlap = len(words & {w for w in it["text"].lower().split() if len(w) > 4})
+        if overlap > best:
+            best, best_id = overlap, it["id"]
+    return best_id
+
+
 def _fca(story: Story) -> str:
     return story.fca_impact.value if story.fca_impact else "HIGH (unconfirmed)"
 
@@ -143,6 +160,8 @@ def fca_regulatory_impact(story: Story, artifacts=None, upstream=None) -> dict:
     impact = _fca(story).split()[0]  # LOW / MEDIUM / HIGH (drop "(unconfirmed)")
     if impact not in ("LOW", "MEDIUM", "HIGH"):
         impact = "HIGH"
+    acs = _ac_items(story)
+    _by = lambda kw: _ac_ref_for(kw, acs)  # noqa: E731 — anchor a reg to its triggering AC
     return {
         "verdict": "WARN",
         "summary": (
@@ -172,18 +191,21 @@ def fca_regulatory_impact(story: Story, artifacts=None, upstream=None) -> dict:
                 "area": "PRIN",
                 "obligation": "Deliver good outcomes for retail clients (Consumer Duty).",
                 "relevance": "The change alters a figure clients rely on.",
+                "triggered_by": _by("balance rollup client figure display total"),
             },
             {
                 "handbook_ref": "COBS 9.2",
                 "area": "COBS",
                 "obligation": "Maintain suitability and adequate records of client-facing outputs.",
                 "relevance": "Recalculated figures must be evidenced and reproducible.",
+                "triggered_by": _by("rounding display figure accurate recalculate"),
             },
             {
                 "handbook_ref": "SYSC 9.1",
                 "area": "SYSC",
                 "obligation": "Keep orderly records sufficient to reconstruct decisions.",
                 "relevance": "Supports the 7-year audit trail for recalculations.",
+                "triggered_by": _by("audit record recalculation evidence"),
             },
         ],
         "key_risks": [
@@ -568,8 +590,12 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
         },
     ]
 
+    acs = _ac_items(story)
     scenarios = []
     for spec in specs:
+        # Evidence anchor: which acceptance criteria this scenario validates.
+        anchor_text = spec["title"] + " " + " ".join(spec.get("covers") or [])
+        ac_refs = sorted({_ac_ref_for(anchor_text, acs)}) if acs else []
         scenarios.append(
             {
                 "title": spec["title"],
@@ -580,6 +606,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
                 "automation": spec["automation"],
                 "tags": _bdd_tags(spec),
                 "covers": spec["covers"],
+                "ac_refs": ac_refs,
                 "gherkin": spec["gherkin"],
             }
         )
@@ -743,6 +770,7 @@ def ac_compliance(story: Story, artifacts=None, upstream=None) -> dict:
 
         mapping.append(
             {
+                "ac_id": f"AC-{i + 1}",
                 "criterion": c,
                 "status": status,
                 "components": comps,
@@ -1572,6 +1600,7 @@ def test_execution_analyst(story: Story, artifacts=None, upstream=None) -> dict:
                 "priority": priority,
                 "is_fca_scenario": is_fca,
                 "bdd_scenario": matched.get("title") if matched else None,
+                "ac_ref": (matched.get("ac_refs") or [None])[0] if matched else None,
                 "likely_flaky": flaky,
                 "rerun_recommended": flaky,
                 "detail": f.get("message", "") or "(no message)",
