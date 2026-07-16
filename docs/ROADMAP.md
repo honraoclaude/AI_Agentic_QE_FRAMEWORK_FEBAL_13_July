@@ -69,10 +69,53 @@ we agree scope, then build following the plan → confirm → build rhythm.*
   Root Cause, Accessibility (WCAG for client portals), Data Migration Validation.
   *(shortlist — TBD)*
 
+## 7. Architecture & tech-debt improvements
+*Architect's review output. Trajectory agreed: **demo / prototype / portfolio** —
+so items are right-sized to demonstrate senior judgement, not gold-plated for a
+live regulated deployment. Sequenced into reviewable batches, signal-first.
+Nothing built yet.*
+
+**Batch 1 — CI + cheap correctness (highest signal per hour)**
+- 🟢 **GitHub Actions CI (S)** — pytest + `tsc`/`vite build` on every push; green
+  badge on the README.
+- 🟢 **Enforce signer roles at gate sign-off (S)** — reject a sign-off whose role
+  isn't a permitted signer for the phase (`workflow.signoff_gate` + existing
+  `GATE_SIGNERS`). Makes the HITL model actually enforced.
+- 🟡 **`ARCHITECTURE.md` + ruff/eslint config (S)** — document the `.env`-vs-DB
+  settings boundary and the (deferred) migration strategy.
+
+**Batch 2 — Robustness (small, good hygiene)**
+- 🟡 Retain raw Copado payload + payload size cap + a TestClient HTTP-level Copado test.
+- 🟡 Artifact **dedupe/precedence** in `gather_for_agent` (newest-per-kind).
+- ⚪ **Startup validation** of configured model IDs.
+
+**Batch 3 — Refactors (craftsmanship)**
+- 🟡 Split `demo_outputs.py` (1,506 lines) and `RunCard.tsx` (1,208) into per-agent
+  modules/components.
+- 🟡 Consolidate response models into `schemas/`; introduce a **declarative
+  per-agent capability registry** (artifact kinds + upstream + blocking + prompt
+  version in one place).
+- ⚪ Frontend/backend type drift — document an OpenAPI→TS convention (codegen slimmed).
+
+**Batch 4 — Auth seam (portfolio version, not real SSO)**
+- 🟡 Introduce an **auth/identity dependency** resolving "current actor + roles"
+  (stubbed for demo, pluggable for OIDC); derive `approver` from it instead of the
+  request body. Demonstrates authN/authZ + non-repudiation without an IdP integration.
+
+**Deliberately slimmed / deferred (portfolio scope):**
+- ❌ Real SSO/OIDC integration — the seam (Batch 4) shows the judgement; full IdP
+  wiring is effort no reviewer exercises.
+- ⏸ Alembic migrations + Postgres append-only triggers — matter only for live
+  deployment; documented in `ARCHITECTURE.md` instead. *(Optional showcase: add
+  Alembic anyway, ~1h.)*
+
 ---
 
 ### Suggested starting order
 1. **Regulatory Evidence Pack** — highest value-per-effort, makes the compliance
    story tangible.
 2. **Cross-agent Referee** — directly strengthens trust in the agentic pipeline.
-3. Then prioritise new Development/Testing agents (Section 6) once scope is agreed.
+3. **Architecture Batch 1** (Section 7) — CI + role enforcement; credibility for
+   little code, guards everything after.
+4. Then Architecture Batches 2–4, new Development/Testing agents (Section 6), and
+   Copado Phase 2 gating as scope is agreed.
