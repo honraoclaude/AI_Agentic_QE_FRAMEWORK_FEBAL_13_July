@@ -81,6 +81,10 @@ AGENT_ARTIFACT_KINDS: dict[str, list[ArtifactKind]] = {
     "defect_triage": [ArtifactKind.JUNIT],
     "security_dast": [ArtifactKind.SARIF, ArtifactKind.METADATA],
     "test_data_management": [ArtifactKind.METADATA],
+    "deployment_risk": [ArtifactKind.METADATA],
+    "change_management": [ArtifactKind.METADATA],
+    "post_deploy_verification": [ArtifactKind.METADATA],
+    "release_notes": [ArtifactKind.METADATA],
 }
 
 # Which agents consume the accepted output of upstream agents on the same
@@ -100,6 +104,8 @@ AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
     "integration_e2e_journey": ["bdd_generator", "regression_scope"],
     "defect_triage": ["test_execution_analyst"],
     "uat_test_design": ["bdd_generator", "compliance_ac_advisor"],
+    "post_deploy_verification": ["bdd_generator"],
+    "release_notes": ["bdd_generator", "ac_compliance"],
 }
 
 

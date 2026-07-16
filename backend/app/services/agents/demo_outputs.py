@@ -2157,6 +2157,218 @@ def regulatory_audit_trail(story: Story, artifacts=None) -> dict:
     }
 
 
+def deployment_risk(story: Story, artifacts=None) -> dict:
+    meta = _parsed(artifacts, "METADATA")
+    components = (meta or {}).get("components", []) if meta else []
+    fca = _fca(story).split()[0]
+    high_impact = fca == "HIGH"
+    factors = [
+        {"factor": "FCA / regulatory impact", "impact": "HIGH" if high_impact else "MEDIUM",
+         "status": "CONCERN" if high_impact else "OK",
+         "note": f"Story FCA impact {fca}; client-facing financial figure in scope."},
+        {"factor": "Financial data integrity", "impact": "HIGH", "status": "OK",
+         "note": "Reconciliation passed; no release-blocking financial failure."},
+        {"factor": "Test & coverage status", "impact": "MEDIUM", "status": "CONCERN",
+         "note": "Apex coverage on new code near the floor — watch post-deploy."},
+        {"factor": "Blast radius", "impact": "MEDIUM" if components else "LOW", "status": "OK",
+         "note": f"{len(components) or 'few'} changed component(s), isolated to rollup logic."},
+    ]
+    concerns = [f for f in factors if f["status"] == "CONCERN"]
+    blockers = [f for f in factors if f["status"] == "BLOCKER"]
+    score = min(100, 20 + 25 * len(concerns) + 50 * len(blockers))
+    if blockers:
+        rec, level, verdict = "NO_GO", "HIGH", "FAIL"
+    elif concerns:
+        rec, level, verdict = "CONDITIONAL_GO", "MEDIUM", "WARN"
+    else:
+        rec, level, verdict = "GO", "LOW", "PASS"
+    conditions = (
+        ["Deploy in the agreed window with Compliance on the bridge",
+         "Run the post-deploy financial spot-check before go-live announcement"]
+        if rec == "CONDITIONAL_GO" else []
+    )
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"Deployment risk for {story.jira_key}: {rec} (score {score}/100, {level}). "
+            f"{len(concerns)} concern(s), {len(blockers)} blocker(s)."
+        ),
+        "findings": [
+            {"title": f"Risk concern: {f['factor']}", "detail": f["note"], "severity": "MEDIUM"}
+            for f in concerns
+        ],
+        "release_blocking": False,
+        "recommendation": rec,
+        "risk_score": score,
+        "risk_level": level,
+        "blast_radius": (
+            f"{len(components)} changed component(s); household rollup + financial-account "
+            "trigger; ripples into Sales person accounts via sync." if components
+            else "Rollup logic; ripples into Sales person accounts via sync."
+        ),
+        "factors": factors,
+        "conditions": conditions,
+    }
+
+
+def change_management(story: Story, artifacts=None) -> dict:
+    meta = _parsed(artifacts, "METADATA")
+    components = (meta or {}).get("components", []) if meta else []
+    high_impact = _fca(story).split()[0] == "HIGH"
+    change_type = "NORMAL" if high_impact else "STANDARD"
+    approvers = [
+        {"role": "Product Owner", "status": "APPROVED"},
+        {"role": "Change Manager", "status": "PENDING"},
+        {"role": "Tech Lead", "status": "APPROVED"},
+    ]
+    if high_impact:
+        approvers.append({"role": "Compliance Officer", "status": "PENDING"})
+    freeze_conflict = False
+    pending = [a for a in approvers if a["status"] == "PENDING"]
+    cab_ready = not freeze_conflict
+    verdict = "WARN" if (pending or freeze_conflict) else "PASS"
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"{change_type} change for {story.jira_key}: "
+            f"{'CAB-ready' if cab_ready else 'not CAB-ready'}, "
+            f"{len(pending)} approval(s) pending"
+            + (", change-freeze conflict" if freeze_conflict else "") + "."
+        ),
+        "findings": [
+            {"title": f"Approval pending: {a['role']}", "detail": "Required before the CAB.",
+             "severity": "LOW"}
+            for a in pending
+        ],
+        "release_blocking": False,
+        "change_type": change_type,
+        "risk_category": "HIGH" if high_impact else "MEDIUM",
+        "affected_services": ["FSC household rollup", "Sales person-account sync"]
+        + (["Marketing journeys"] if len(components) > 2 else []),
+        "proposed_window": "Sat 22:00–23:00 (outside market hours, no month-end)",
+        "freeze_conflict": freeze_conflict,
+        "approvers": approvers,
+        "cab_ready": cab_ready,
+    }
+
+
+def post_deploy_verification(story: Story, artifacts=None, upstream=None) -> dict:
+    bdd = _upstream_output(upstream, "bdd_generator")
+    scenarios = (bdd or {}).get("scenarios", []) if bdd else []
+    smoke_from_bdd = [s.get("title") for s in scenarios
+                      if any(t in (s.get("tags") or []) for t in ("@smoke", "@fca"))][:2]
+    checks = [
+        {"name": "Household summary page loads", "category": "SMOKE",
+         "target": "/s/household", "expected_result": "Page renders with the client balance", "priority": "P1"},
+        {"name": "Rollup recalculation spot-check", "category": "DATA",
+         "target": "HouseholdRollupService", "expected_result": "A known household total matches finance's figure", "priority": "P1"},
+        {"name": "FSC→Sales person-account sync", "category": "INTEGRATION",
+         "target": "Sync job", "expected_result": "Household change reflects on the Sales person account", "priority": "P1"},
+        {"name": "Apex jobs & platform events healthy", "category": "HEALTH",
+         "target": "Async jobs", "expected_result": "No failed jobs; queue draining", "priority": "P2"},
+    ]
+    for t in smoke_from_bdd:
+        checks.append({"name": t[:60], "category": "SMOKE", "target": "critical path",
+                       "expected_result": "Scenario behaves as specified in production", "priority": "P1"})
+    return {
+        "verdict": "PASS",
+        "summary": (
+            f"{len(checks)} post-deploy check(s) defined for {story.jira_key} "
+            f"({sum(1 for c in checks if c['priority'] == 'P1')} P1). "
+            "Go-live gated on the P1 checks passing."
+        ),
+        "findings": [],
+        "release_blocking": False,
+        "checks": checks,
+        "go_live_criteria": [
+            "All P1 smoke/data checks pass",
+            "Financial spot-check reconciles to finance's figure",
+            "No failed async jobs in the first 15 minutes",
+        ],
+        "abort_criteria": [
+            "Any client-facing figure is wrong",
+            "FSC→Sales sync fails",
+            "Error rate on the portal exceeds baseline",
+        ],
+        "verification_window": "First 60 minutes post-deploy, then hourly for 24h",
+    }
+
+
+def release_notes(story: Story, artifacts=None, upstream=None) -> dict:
+    meta = _parsed(artifacts, "METADATA")
+    components = (meta or {}).get("components", []) if meta else []
+    criteria = _ac(story)
+
+    def _ctype(name: str) -> str:
+        low = name.lower()
+        return ("CONFIG" if any(k in low for k in ("flow", "permission", "layout"))
+                else "DATA" if "object" in low or "field" in low else "FEATURE")
+
+    changes = [
+        {"component": comp, "type": _ctype(comp),
+         "description": f"Updated {comp.split(':')[-1].strip()} to support the household rollup change."}
+        for comp in (components or ["ApexClass: HouseholdRollupService"])
+    ]
+    return {
+        "verdict": "PASS",
+        "summary": (
+            f"Release notes drafted for {story.jira_key}: {len(changes)} change(s), "
+            f"{len(criteria)} acceptance criterion/criteria delivered."
+        ),
+        "findings": [],
+        "release_blocking": False,
+        "title": story.summary,
+        "version": f"{story.jira_key}-1.0",
+        "overview": (
+            f"This release delivers {story.summary.lower()} on {_cloud(story)}. "
+            "Client-facing household balances now recalculate accurately with a full audit record."
+        ),
+        "changes": changes,
+        "acceptance_criteria_delivered": [c[:100] for c in criteria],
+        "known_issues": [
+            "Bulk recalculation of very large households (>500 accounts) is queued asynchronously — a brief delay is expected."
+        ],
+    }
+
+
+def monitoring_hypercare(story: Story, artifacts=None) -> dict:
+    dashboards = [
+        {"name": "Household rollup health", "detail": "Recalc volume, latency, failure rate", "status": "READY"},
+        {"name": "FSC→Sales sync", "detail": "Sync throughput and error rate", "status": "READY"},
+        {"name": "Wealth portal", "detail": "Page load + error rate", "status": "MISSING"},
+    ]
+    alerts = [
+        {"name": "Rollup failure rate", "detail": "> 1% over 5 min", "status": "READY"},
+        {"name": "SOQL/governor exceptions", "detail": "any in prod", "status": "READY"},
+        {"name": "Sync backlog", "detail": "> 100 queued > 10 min", "status": "MISSING"},
+    ]
+    slos = [
+        {"name": "Recalculation latency", "detail": "p95 < 5s", "status": "READY"},
+        {"name": "Portal availability", "detail": "99.9%", "status": "READY"},
+    ]
+    missing = [x["name"] for x in dashboards + alerts if x["status"] == "MISSING"]
+    verdict = "WARN" if missing else "PASS"
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"Monitoring & hypercare for {story.jira_key}: "
+            + (f"{len(missing)} item(s) MISSING ({', '.join(missing)})." if missing
+               else "dashboards, alerts and SLOs all READY.")
+        ),
+        "findings": [
+            {"title": f"Monitoring gap: {m}", "detail": "Set up before go-live.", "severity": "MEDIUM"}
+            for m in missing
+        ],
+        "release_blocking": False,
+        "dashboards": dashboards,
+        "alerts": alerts,
+        "slos": slos,
+        "runbook_ready": True,
+        "hypercare_window": "48 hours elevated support post-go-live",
+        "on_call": ["FSC engineer", "Integration engineer", "QE on-call"],
+    }
+
+
 GENERATORS = {
     "story_quality": story_quality,
     "fca_regulatory_impact": fca_regulatory_impact,
@@ -2180,6 +2392,11 @@ GENERATORS = {
     "release_readiness": release_readiness,
     "uat_signoff_coordinator": uat_signoff_coordinator,
     "regulatory_audit_trail": regulatory_audit_trail,
+    "deployment_risk": deployment_risk,
+    "change_management": change_management,
+    "post_deploy_verification": post_deploy_verification,
+    "release_notes": release_notes,
+    "monitoring_hypercare": monitoring_hypercare,
 }
 
 

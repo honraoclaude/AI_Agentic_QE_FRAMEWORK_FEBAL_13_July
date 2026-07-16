@@ -321,6 +321,68 @@ AGENTS: dict[str, AgentDefinition] = {
                 "what, when, with what evidence)."
             ),
         ),
+        AgentDefinition(
+            key="deployment_risk",
+            name="Deployment Risk & Go/No-Go Assessor",
+            phase=Phase.RELEASE,
+            sequence=4,
+            pact=("Proactive", "Targeted"),
+            purpose=(
+                "Aggregates gate results, coverage, open defects and change "
+                "blast-radius into a risk-scored GO / CONDITIONAL_GO / NO_GO "
+                "recommendation with the specific risk factors and any conditions — "
+                "turning the readiness evidence into an explicit, defensible decision."
+            ),
+        ),
+        AgentDefinition(
+            key="change_management",
+            name="Change Management & CAB Readiness Agent",
+            phase=Phase.RELEASE,
+            sequence=5,
+            pact=("Collaborative",),
+            purpose=(
+                "Assembles the ITIL change record for the CAB: change type, risk "
+                "category, affected services, proposed window with change-freeze "
+                "check, and the approver matrix — the formal change-control layer "
+                "above UAT sign-off."
+            ),
+        ),
+        AgentDefinition(
+            key="post_deploy_verification",
+            name="Post-Deployment Verification Agent",
+            phase=Phase.RELEASE,
+            sequence=6,
+            pact=("Autonomous", "Targeted"),
+            purpose=(
+                "Defines the production smoke tests and health checks to run "
+                "immediately after deploy, with go-live and abort (rollback) "
+                "criteria — the 'did it actually work in prod' check."
+            ),
+        ),
+        AgentDefinition(
+            key="release_notes",
+            name="Release Notes & Change Documentation Agent",
+            phase=Phase.RELEASE,
+            sequence=7,
+            pact=("Autonomous",),
+            purpose=(
+                "Generates the release notes / change record from the story, "
+                "delivered acceptance criteria and changed components — grouped by "
+                "change type, with known issues."
+            ),
+        ),
+        AgentDefinition(
+            key="monitoring_hypercare",
+            name="Post-Release Monitoring & Hypercare Agent",
+            phase=Phase.RELEASE,
+            sequence=8,
+            pact=("Proactive",),
+            purpose=(
+                "Confirms the dashboards, alerts/SLOs and support runbook are in "
+                "place before go-live, and defines the hypercare window and on-call — "
+                "so the release is observable and supportable from minute one."
+            ),
+        ),
     ]
 }
 

@@ -592,6 +592,71 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       );
     }
 
+    // Deployment risk factors.
+    if (
+      value.every(
+        (v) => typeof v === "object" && v !== null && "factor" in v && "impact" in v && "status" in v,
+      )
+    ) {
+      const stCls: Record<string, string> = {
+        OK: "border-ok/50 bg-ok/10 text-ok",
+        CONCERN: "border-warn/50 bg-warn/10 text-warn",
+        BLOCKER: "border-bad/50 bg-bad/10 text-bad",
+      };
+      return (
+        <div className="flex flex-col gap-1.5">
+          {value.map((v, i) => {
+            const f = v as { factor: string; impact: string; status: string; note: string };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                  <Badge className={stCls[f.status] ?? "border-line text-ink-dim"}>{f.status}</Badge>
+                  <span className="text-[11px] font-medium text-ink">{f.factor}</span>
+                  <span className="font-mono text-[10px] text-ink-faint">impact {f.impact}</span>
+                </div>
+                <div className="text-[10px] text-ink-dim">{f.note}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Post-deploy verification checks.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "category" in v &&
+          "target" in v &&
+          "expected_result" in v,
+      )
+    ) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          {value.map((v, i) => {
+            const c = v as {
+              name: string; category: string; target: string;
+              expected_result: string; priority: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                  <Badge className="border-line text-ink-dim">{c.priority}</Badge>
+                  <span className="font-mono text-[10px] text-accent">{c.category.toLowerCase()}</span>
+                  <span className="text-[11px] font-medium text-ink">{c.name}</span>
+                </div>
+                <div className="text-[10px] text-ink-dim">
+                  <span className="text-ink-faint">{c.target}:</span> {c.expected_result}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // Integration & E2E journeys: cross-cloud journeys with status.
     if (
       value.every(

@@ -881,6 +881,97 @@ class RegulatoryAuditOutput(AgentOutputBase):
     completeness_confirmed: bool
 
 
+# --- Release: Deployment Risk & Go/No-Go ---------------------------------
+
+
+class RiskFactor(BaseModel):
+    factor: str
+    impact: Literal["LOW", "MEDIUM", "HIGH"]
+    status: Literal["OK", "CONCERN", "BLOCKER"]
+    note: str
+
+
+class DeploymentRiskOutput(AgentOutputBase):
+    recommendation: Literal["GO", "CONDITIONAL_GO", "NO_GO"]
+    risk_score: int = Field(ge=0, le=100, description="0 = safe, 100 = severe")
+    risk_level: Literal["LOW", "MEDIUM", "HIGH"]
+    blast_radius: str
+    factors: list[RiskFactor]
+    conditions: list[str] = Field(description="Conditions to satisfy for a CONDITIONAL_GO")
+
+
+# --- Release: Change Management / CAB Readiness ---------------------------
+
+
+class ChangeApprover(BaseModel):
+    role: str
+    status: Literal["APPROVED", "PENDING", "REJECTED"]
+
+
+class ChangeManagementOutput(AgentOutputBase):
+    change_type: Literal["STANDARD", "NORMAL", "EMERGENCY"]
+    risk_category: Literal["LOW", "MEDIUM", "HIGH"]
+    affected_services: list[str]
+    proposed_window: str
+    freeze_conflict: bool = Field(description="Does the window clash with a change freeze?")
+    approvers: list[ChangeApprover]
+    cab_ready: bool
+
+
+# --- Release: Post-Deployment Verification (Smoke) ------------------------
+
+
+class VerificationCheck(BaseModel):
+    name: str
+    category: Literal["SMOKE", "HEALTH", "INTEGRATION", "DATA"]
+    target: str
+    expected_result: str
+    priority: Literal["P1", "P2", "P3"]
+
+
+class PostDeployVerificationOutput(AgentOutputBase):
+    checks: list[VerificationCheck]
+    go_live_criteria: list[str]
+    abort_criteria: list[str] = Field(description="Signals that trigger a rollback")
+    verification_window: str
+
+
+# --- Release: Release Notes & Change Documentation ------------------------
+
+
+class ChangeEntry(BaseModel):
+    component: str
+    type: Literal["FEATURE", "FIX", "CONFIG", "DATA"]
+    description: str
+
+
+class ReleaseNotesOutput(AgentOutputBase):
+    title: str
+    version: str
+    overview: str
+    changes: list[ChangeEntry]
+    acceptance_criteria_delivered: list[str]
+    known_issues: list[str]
+
+
+# --- Release: Post-Release Monitoring & Hypercare ------------------------
+
+
+class MonitorItem(BaseModel):
+    name: str
+    detail: str = Field(description="Threshold / target / dashboard purpose")
+    status: Literal["READY", "MISSING"]
+
+
+class MonitoringHypercareOutput(AgentOutputBase):
+    dashboards: list[MonitorItem]
+    alerts: list[MonitorItem]
+    slos: list[MonitorItem]
+    runbook_ready: bool
+    hypercare_window: str
+    on_call: list[str]
+
+
 OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "story_quality": StoryQualityOutput,
     "fca_regulatory_impact": FcaRegulatoryImpactOutput,
@@ -904,4 +995,9 @@ OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "release_readiness": ReleaseReadinessOutput,
     "uat_signoff_coordinator": UatSignoffOutput,
     "regulatory_audit_trail": RegulatoryAuditOutput,
+    "deployment_risk": DeploymentRiskOutput,
+    "change_management": ChangeManagementOutput,
+    "post_deploy_verification": PostDeployVerificationOutput,
+    "release_notes": ReleaseNotesOutput,
+    "monitoring_hypercare": MonitoringHypercareOutput,
 }
