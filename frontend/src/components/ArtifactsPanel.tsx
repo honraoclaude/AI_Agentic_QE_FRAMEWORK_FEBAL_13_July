@@ -31,15 +31,27 @@ function bytes(n: number): string {
 
 export function ArtifactsPanel({
   storyId,
+  jiraKey,
+  githubRepo,
+  githubBranch,
   actor,
 }: {
   storyId: string;
+  jiraKey: string;
+  githubRepo: string | null;
+  githubBranch: string | null;
   actor: string;
 }) {
   const [kind, setKind] = useState<ArtifactKind | "AUTO">("AUTO");
+  const [repo, setRepo] = useState(githubRepo ?? "");
+  const [branch, setBranch] = useState(githubBranch ?? "");
+  const [env, setEnv] = useState("UAT");
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const queryClient = useQueryClient();
+
+  const copadoStatus = useQuery({ queryKey: ["copado-status"], queryFn: api.copadoStatus });
+  const githubStatus = useQuery({ queryKey: ["github-status"], queryFn: api.githubStatus });
 
   const artifactsQuery = useQuery({
     queryKey: ["artifacts", storyId],
@@ -81,6 +93,31 @@ export function ArtifactsPanel({
     onError: (e: Error) => toast("error", e.message),
   });
 
+  const ghConnect = useMutation({
+    mutationFn: () => api.githubConnect(storyId, repo.trim(), branch.trim(), actor || "unknown"),
+    onSuccess: (r) => {
+      toast("ok", `Linked ${r.github_repo}@${r.github_branch}`);
+      queryClient.invalidateQueries({ queryKey: ["story", storyId] });
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+  const ghSync = useMutation({
+    mutationFn: () => api.githubSync(storyId, actor || "unknown"),
+    onSuccess: (r) => {
+      toast("ok", `Pulled ${r.ingested.length} artifact(s) from the branch`);
+      invalidate();
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+  const copadoSim = useMutation({
+    mutationFn: () => api.copadoSimulate(jiraKey, env),
+    onSuccess: (r) => {
+      toast("ok", `Copado run ingested ${r.ingested.length} artifact(s)`);
+      invalidate();
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+
   const artifacts = artifactsQuery.data ?? [];
   const consumers = consumersQuery.data?.by_kind ?? {};
 
@@ -97,8 +134,112 @@ export function ArtifactsPanel({
     upload.mutate(file);
   };
 
+  const statusPill = (label: string, s?: { demo_mode: boolean; configured: boolean }) => {
+    const [txt, cls] = !s
+      ? ["…", "border-line text-ink-faint"]
+      : s.configured
+        ? ["connected", "border-ok/50 bg-ok/10 text-ok"]
+        : s.demo_mode
+          ? ["demo", "border-warn/40 bg-warn/10 text-warn"]
+          : ["not configured", "border-line text-ink-faint"];
+    return (
+      <Badge className={cls}>
+        {label}: {txt}
+      </Badge>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-4 text-xs">
+      {/* CI/CD connectors — pull artifacts from source */}
+      <div className="rounded-lg border border-line bg-bg/40 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+            Connect a CI/CD pipeline
+          </h3>
+          <div className="ml-auto flex gap-1.5">
+            {statusPill("GitHub", githubStatus.data)}
+            {statusPill("Copado", copadoStatus.data)}
+          </div>
+        </div>
+
+        {/* GitHub */}
+        <div className="mb-2 rounded border border-line bg-panel/60 p-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-ink">
+            <span className="font-mono text-accent">⎇</span> GitHub branch
+            {githubRepo && (
+              <span className="text-[10px] text-ink-faint">
+                linked: {githubRepo}@{githubBranch}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              placeholder="owner/repo"
+              className="w-40 rounded border border-line bg-panel-2 px-2 py-1 text-[11px] text-ink"
+            />
+            <input
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="branch"
+              className="w-36 rounded border border-line bg-panel-2 px-2 py-1 text-[11px] text-ink"
+            />
+            <Button
+              variant="ghost"
+              busy={ghConnect.isPending}
+              onClick={() => {
+                if (!repo.trim() || !branch.trim()) return toast("error", "Enter repo and branch");
+                ghConnect.mutate();
+              }}
+            >
+              Connect
+            </Button>
+            <Button
+              variant="primary"
+              busy={ghSync.isPending}
+              disabled={!githubRepo}
+              onClick={() => ghSync.mutate()}
+              title={githubRepo ? "Pull changed files + CI results" : "Connect a branch first"}
+            >
+              ⤓ Sync branch
+            </Button>
+          </div>
+        </div>
+
+        {/* Copado */}
+        <div className="rounded border border-line bg-panel/60 p-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-ink">
+            <span className="font-mono text-accent">⟳</span> Copado pipeline
+            <span className="text-[10px] text-ink-faint">
+              (real runs arrive via webhook; simulate a run for demo)
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              value={env}
+              onChange={(e) => setEnv(e.target.value)}
+              placeholder="environment"
+              className="w-28 rounded border border-line bg-panel-2 px-2 py-1 text-[11px] text-ink"
+            />
+            <Button
+              variant="primary"
+              busy={copadoSim.isPending}
+              disabled={!copadoStatus.data?.demo_mode}
+              onClick={() => copadoSim.mutate()}
+              title={
+                copadoStatus.data?.demo_mode
+                  ? "Inject a sample Copado pipeline run"
+                  : "Simulate is demo-mode only"
+              }
+            >
+              ▷ Simulate run
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-lg border border-line bg-bg/40 p-3">
         <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
           Upload a CI/CD artifact

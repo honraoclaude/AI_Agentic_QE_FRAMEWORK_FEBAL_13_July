@@ -2,6 +2,7 @@ import type {
   AgentDef,
   AgentInsights,
   Artifact,
+  ConnectorStatus,
   ArtifactKind,
   AuditEvent,
   Gate,
@@ -48,6 +49,28 @@ const post = <T,>(path: string, body?: unknown) =>
 
 export const api = {
   agentInsights: () => request<AgentInsights>("/insights/agents"),
+
+  // CI/CD connectors
+  copadoStatus: () => request<ConnectorStatus>("/copado/status"),
+  copadoSimulate: (jira_key: string, environment: string) =>
+    post<{ ingested: { kind: string; summary: string }[] }>("/copado/simulate", {
+      jira_key,
+      environment,
+    }),
+  githubStatus: () => request<ConnectorStatus>("/github/status"),
+  githubConnect: (story_id: string, repo: string, branch: string, actor: string) =>
+    post<{ github_repo: string; github_branch: string }>("/github/connect", {
+      story_id,
+      repo,
+      branch,
+      actor,
+    }),
+  githubSync: (story_id: string, actor: string) =>
+    post<{ ingested: { kind: string; summary: string }[] }>("/github/sync", {
+      story_id,
+      actor,
+    }),
+
   stories: () => request<StoryBoard[]>("/stories"),
   story: (id: string) => request<StoryDetail>(`/stories/${id}`),
   health: (id: string) => request<StoryHealth>(`/stories/${id}/health`),

@@ -388,7 +388,13 @@ export function StoryDrawer({
               )}
 
               {tab === "artifacts" && (
-                <ArtifactsPanel storyId={storyId} actor={actor} />
+                <ArtifactsPanel
+                  storyId={storyId}
+                  jiraKey={story.jira_key}
+                  githubRepo={story.github_repo}
+                  githubBranch={story.github_branch}
+                  actor={actor}
+                />
               )}
 
               {tab === "timeline" && (

@@ -89,6 +89,9 @@ class StoryOut(ORMModel):
     current_phase: Phase
     scope_status: ScopeStatus
     released: bool
+    copado_user_story_id: str | None = None
+    github_repo: str | None = None
+    github_branch: str | None = None
     jira_updated_at: datetime | None
     last_synced_at: datetime | None
     changed_since_agent_run: bool

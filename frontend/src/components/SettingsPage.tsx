@@ -17,6 +17,8 @@ export function SettingsPage({ actor }: { actor: string }) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: api.agents });
+  const copadoStatus = useQuery({ queryKey: ["copado-status"], queryFn: api.copadoStatus });
+  const githubStatus = useQuery({ queryKey: ["github-status"], queryFn: api.githubStatus });
   const [draft, setDraft] = useState<SettingsView["settings"] | null>(null);
   const [testing, setTesting] = useState<Record<string, unknown> | null>(null);
 
@@ -240,6 +242,42 @@ export function SettingsPage({ actor }: { actor: string }) {
                     </label>
                   )}
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* CI/CD connections status */}
+      <section className="mb-6 rounded-lg border border-line bg-panel p-4">
+        <h2 className="mb-1 text-xs font-bold uppercase tracking-widest text-ink-dim">
+          CI/CD connections
+        </h2>
+        <p className="mb-3 text-[11px] text-ink-dim">
+          Connectors are configured via <code>.env</code>. In demo mode they use offline
+          mock adapters; set the credentials to go live. Connect and sync per story from
+          the Artifacts panel.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            ["GitHub", githubStatus.data, "GITHUB_TOKEN"],
+            ["Copado", copadoStatus.data, "COPADO_* + webhook secret"],
+          ].map(([name, s, envHint]) => {
+            const st = s as { demo_mode: boolean; configured: boolean } | undefined;
+            const [txt, cls] = !st
+              ? ["…", "border-line text-ink-faint"]
+              : st.configured
+                ? ["Connected (live)", "border-ok/40 bg-ok/10 text-ok"]
+                : st.demo_mode
+                  ? ["Demo (mock adapter)", "border-warn/40 bg-warn/10 text-warn"]
+                  : ["Not configured", "border-line text-ink-faint"];
+            return (
+              <div key={name as string} className="rounded border border-line p-2.5">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-xs font-semibold text-ink">{name as string}</span>
+                  <Badge className={`ml-auto ${cls}`}>{txt}</Badge>
+                </div>
+                <div className="text-[10px] text-ink-faint">via {envHint as string}</div>
               </div>
             );
           })}

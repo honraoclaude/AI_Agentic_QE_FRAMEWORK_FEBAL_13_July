@@ -114,9 +114,18 @@ export interface StoryBase {
   current_phase: Phase;
   scope_status: "ACTIVE" | "OUT_OF_SCOPE";
   released: boolean;
+  copado_user_story_id: string | null;
+  github_repo: string | null;
+  github_branch: string | null;
   jira_updated_at: string | null;
   last_synced_at: string | null;
   changed_since_agent_run: boolean;
+}
+
+export interface ConnectorStatus {
+  ok: boolean;
+  demo_mode: boolean;
+  configured: boolean;
 }
 
 export interface StoryBoard extends StoryBase {
