@@ -62,6 +62,38 @@ they ship.*
   shipped `confidence.level` to force a mandatory human review when LOW, rather
   than letting it flow through on Accept.
 
+### 📌 PARKED — Meta-agents: agent health + memory (build in sequence)
+*Agents about the agents. Note the overlap with what's already shipped, and the
+FCA guardrail on "learning".*
+
+**Already shipped (don't rebuild):** Cross-Agent Referee + Release Health Index
+(per-story synthesis + contradictions); Agent-Performance / Feedback analytics
+(`/insights/agents` — per-agent trust, accept/reject/rerun). Those cover *quality*
+health. The two below are the gaps.
+
+**1) Operational Agent Health monitor (M) — build first.**
+The SRE/observability layer the quality analytics don't give: failure/error rates
+(`RUN_FAILED`), latency, **token cost/budget**, per-model and **per-prompt-version
+reliability** (did v3 regress?), confidence trend, and **anomaly alerts**
+("Static Analysis started failing after the v3 prompt"). Deterministic **service +
+dashboard** (like Insights) — cheap and reproducible; an LLM layer is only needed
+later for narrative "why is it degrading" explanations. Design sketch was
+`services/agent_health.py` → `GET /insights/agent-health` → an "Operational Health"
+section on the Agent Insights tab.
+
+**2) Institutional Memory — advisory briefing agent (L) — build second.**
+Today every agent is **stateless** (no memory across stories). A Refinement-phase
+**advisory briefing agent** would, at intake, recall relevant past
+stories/decisions/outcomes and brief the team ("similar to WLTH-88, which failed
+Financial Integrity on rounding; reusable BDD from WLTH-90"), backed by a memory
+store. Scoped **advisory-only** (agreed):
+- **Advisory** — surfaces context; the human still gates. No behaviour auto-change.
+- **Transparent** — what it recalled and why is in the audit trail.
+- **Reproducible** — a past decision replays with the memory it used.
+- *Deferred (FCA landmine):* RAG knowledge reuse (retrieve past accepted BDD /
+  reg-mappings / fixtures) and **any feedback-driven self-tuning** — the latter
+  risks auditability/reproducibility and is cautioned against in a regulated context.
+
 ## 3. Proactive intelligence
 *Activates the underused "P" (Proactive) in PACT.*
 
