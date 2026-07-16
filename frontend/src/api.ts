@@ -1,5 +1,6 @@
 import type {
   AgentDef,
+  AgentInsights,
   Artifact,
   ArtifactKind,
   AuditEvent,
@@ -46,6 +47,7 @@ const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 
 export const api = {
+  agentInsights: () => request<AgentInsights>("/insights/agents"),
   stories: () => request<StoryBoard[]>("/stories"),
   story: (id: string) => request<StoryDetail>(`/stories/${id}`),
   health: (id: string) => request<StoryHealth>(`/stories/${id}/health`),

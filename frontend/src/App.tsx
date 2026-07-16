@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "./api";
 import { AuditView } from "./components/AuditView";
+import { InsightsView } from "./components/InsightsView";
 import { PipelineBoard } from "./components/PipelineBoard";
 import { PushQueueView } from "./components/PushQueueView";
 import { SettingsPage } from "./components/SettingsPage";
@@ -10,11 +11,12 @@ import { ROLES, type Role } from "./types";
 import { Button, inputCls, useToast } from "./ui";
 import { useLiveUpdates } from "./ws";
 
-type Tab = "work" | "board" | "push" | "audit" | "settings";
+type Tab = "work" | "board" | "insights" | "push" | "audit" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "work", label: "My Work" },
   { id: "board", label: "Pipeline" },
+  { id: "insights", label: "Agent Insights" },
   { id: "push", label: "Jira Push Queue" },
   { id: "audit", label: "Audit Trail" },
   { id: "settings", label: "Settings" },
@@ -148,6 +150,7 @@ export default function App() {
           <WorkQueue role={role} actor={actor} onGoToPush={() => setTab("push")} />
         )}
         {tab === "board" && <PipelineBoard actor={actor} />}
+        {tab === "insights" && <InsightsView />}
         {tab === "push" && <PushQueueView actor={actor} />}
         {tab === "audit" && <AuditView />}
         {tab === "settings" && <SettingsPage actor={actor} />}

@@ -14,6 +14,7 @@ from .api import (
     demo,
     gates,
     github,
+    insights,
     jira,
     push,
     runs,
@@ -101,6 +102,7 @@ app.include_router(artifacts.router, prefix=API_PREFIX)
 app.include_router(agents.router, prefix=API_PREFIX)
 app.include_router(copado.router, prefix=API_PREFIX)
 app.include_router(github.router, prefix=API_PREFIX)
+app.include_router(insights.router, prefix=API_PREFIX)
 app.include_router(demo.router, prefix=API_PREFIX)
 app.include_router(ws.router)
 

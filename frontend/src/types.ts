@@ -183,6 +183,36 @@ export const ARTIFACT_KINDS: ArtifactKind[] = [
   "GENERIC",
 ];
 
+export interface AgentPerf {
+  agent_key: string;
+  agent_name: string;
+  phase: string;
+  accepted: number;
+  rejected: number;
+  reruns: number;
+  decided: number;
+  acceptance_rate: number | null;
+  override_rate: number;
+  trust_score: number | null;
+  avg_attempts: number | null;
+  verdicts: { PASS: number; WARN: number; FAIL: number };
+  reject_reasons: string[];
+  guidance_samples: string[];
+}
+
+export interface AgentInsights {
+  agents: AgentPerf[];
+  summary: {
+    agents_defined: number;
+    agents_with_data: number;
+    total_accepted: number;
+    total_rejected: number;
+    total_reruns: number;
+    overall_acceptance_rate: number | null;
+  };
+  needs_attention: AgentPerf[];
+}
+
 export interface Inconsistency {
   rule: string;
   severity: "HIGH" | "MEDIUM" | "LOW";
