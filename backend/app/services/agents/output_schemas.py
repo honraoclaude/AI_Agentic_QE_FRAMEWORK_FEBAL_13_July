@@ -53,6 +53,88 @@ class StoryQualityOutput(AgentOutputBase):
     )
 
 
+# --- Refinement: regulatory agents (shift-left compliance) ---------------
+
+
+class ApplicableRegulation(BaseModel):
+    handbook_ref: str = Field(description='e.g. "COBS 9.2", "PRIN 2A" (Consumer Duty)')
+    area: Literal["COBS", "PRIN", "PROD", "SYSC", "DISP", "SMCR", "ICOBS", "SUP"]
+    obligation: str = Field(description="The specific obligation this story must meet")
+    relevance: str = Field(description="Why this regulation applies to this story")
+
+
+class FcaRegulatoryImpactOutput(AgentOutputBase):
+    """Cited FCA Handbook mapping + a reasoned FCA-impact proposal (a human
+    confirms; does not auto-write the story)."""
+
+    proposed_fca_impact: Literal["LOW", "MEDIUM", "HIGH"]
+    impact_rationale: str
+    applicable_regulations: list[ApplicableRegulation]
+    key_risks: list[Finding] = Field(
+        description="Regulatory risks if the obligations are not met"
+    )
+
+
+ConsumerDutyOutcome = Literal[
+    "PRODUCTS_AND_SERVICES",
+    "PRICE_AND_VALUE",
+    "CONSUMER_UNDERSTANDING",
+    "CONSUMER_SUPPORT",
+]
+OutcomeStatus = Literal["ADDRESSED", "PARTIAL", "NOT_ADDRESSED", "NOT_APPLICABLE"]
+
+
+class ConsumerDutyAssessment(BaseModel):
+    outcome: ConsumerDutyOutcome
+    status: OutcomeStatus
+    assessment: str
+    foreseeable_harm: str | None = Field(
+        default=None, description="Foreseeable harm to (vulnerable) customers, if any"
+    )
+    gap: str | None = Field(
+        default=None, description="What is missing to fully address the outcome"
+    )
+
+
+class ConsumerDutyOutput(AgentOutputBase):
+    outcomes: list[ConsumerDutyAssessment] = Field(
+        description="All four Consumer Duty outcomes, each assessed"
+    )
+    unaddressed_count: int
+    cross_cutting_notes: str = Field(
+        description="Act in good faith / avoid foreseeable harm / enable financial objectives"
+    )
+
+
+AcCategory = Literal[
+    "AUDIT",
+    "SUITABILITY",
+    "DISCLOSURE",
+    "CONSENT",
+    "VULNERABLE_CUSTOMER",
+    "RECORD_KEEPING",
+    "ACCESS_CONTROL",
+    "DATA_INTEGRITY",
+]
+
+
+class SuggestedCriterion(BaseModel):
+    criterion: str = Field(description="A concrete, testable acceptance-criterion line")
+    category: AcCategory
+    regulatory_basis: str = Field(description='Handbook / Consumer Duty basis, e.g. "SYSC 9.1"')
+    priority: Literal["MUST", "RECOMMENDED"]
+
+
+class ComplianceAcAdvisorOutput(AgentOutputBase):
+    """Turns regulatory obligations into concrete acceptance criteria before
+    Three Amigos / BDD formalise them."""
+
+    suggested_criteria: list[SuggestedCriterion]
+    coverage_gaps: list[str] = Field(
+        description="Obligations with no matching existing acceptance criterion"
+    )
+
+
 class PersonaPrompts(BaseModel):
     product_owner: list[str]
     developer: list[str]
@@ -550,6 +632,9 @@ class RegulatoryAuditOutput(AgentOutputBase):
 
 OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "story_quality": StoryQualityOutput,
+    "fca_regulatory_impact": FcaRegulatoryImpactOutput,
+    "consumer_duty_mapper": ConsumerDutyOutput,
+    "compliance_ac_advisor": ComplianceAcAdvisorOutput,
     "three_amigos": ThreeAmigosOutput,
     "bdd_generator": BddGeneratorOutput,
     "ac_compliance": AcComplianceOutput,

@@ -592,6 +592,133 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       );
     }
 
+    // FCA Regulatory Impact: applicable Handbook obligations.
+    if (
+      value.every(
+        (v) => typeof v === "object" && v !== null && "handbook_ref" in v && "area" in v,
+      )
+    ) {
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const r = v as {
+              handbook_ref: string;
+              area: string;
+              obligation: string;
+              relevance: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex items-center gap-1.5">
+                  <Badge className="border-accent/40 bg-accent/10 text-accent">
+                    {r.handbook_ref}
+                  </Badge>
+                  <span className="font-mono text-[10px] text-ink-faint">{r.area}</span>
+                </div>
+                <div className="text-[11px] text-ink">{r.obligation}</div>
+                <div className="mt-0.5 text-[10px] text-ink-dim">{r.relevance}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Consumer Duty: the four outcomes with RAG status.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "outcome" in v &&
+          "status" in v &&
+          "assessment" in v,
+      )
+    ) {
+      const statusCls: Record<string, string> = {
+        ADDRESSED: "border-ok/50 bg-ok/10 text-ok",
+        PARTIAL: "border-warn/50 bg-warn/10 text-warn",
+        NOT_ADDRESSED: "border-bad/50 bg-bad/10 text-bad",
+        NOT_APPLICABLE: "border-line text-ink-faint",
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const o = v as {
+              outcome: string;
+              status: string;
+              assessment: string;
+              foreseeable_harm?: string | null;
+              gap?: string | null;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex items-center gap-1.5">
+                  <Badge className={statusCls[o.status] ?? "border-line text-ink-dim"}>
+                    {o.status.replaceAll("_", " ")}
+                  </Badge>
+                  <span className="text-[11px] font-medium text-ink">
+                    {o.outcome.replaceAll("_", " ").toLowerCase()}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink-dim">{o.assessment}</div>
+                {o.foreseeable_harm && (
+                  <div className="mt-0.5 text-[10px] text-bad">⚠ {o.foreseeable_harm}</div>
+                )}
+                {o.gap && <div className="mt-0.5 text-[10px] text-warn">Gap: {o.gap}</div>}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Compliance-by-Design: suggested acceptance criteria.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "criterion" in v &&
+          "regulatory_basis" in v,
+      )
+    ) {
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const c = v as {
+              criterion: string;
+              category: string;
+              regulatory_basis: string;
+              priority: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Badge
+                    className={
+                      c.priority === "MUST"
+                        ? "border-bad/50 bg-bad/10 text-bad"
+                        : "border-line text-ink-dim"
+                    }
+                  >
+                    {c.priority}
+                  </Badge>
+                  <span className="font-mono text-[10px] text-ink-faint">
+                    {c.category.replaceAll("_", " ").toLowerCase()}
+                  </span>
+                  <span className="font-mono text-[10px] text-accent">
+                    {c.regulatory_basis}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink">{c.criterion}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // Example Mapping: rule cards each with their example bullets.
     if (
       value.every(

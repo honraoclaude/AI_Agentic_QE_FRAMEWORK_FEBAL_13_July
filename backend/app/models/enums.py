@@ -81,7 +81,11 @@ AGENT_ARTIFACT_KINDS: dict[str, list[ArtifactKind]] = {
 # story (chained pipeline: BDD formalizes the Three Amigos example map; AC
 # Compliance cross-references BDD scenarios for test coverage per criterion).
 AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
-    "bdd_generator": ["story_quality", "three_amigos"],
+    # Refinement regulatory chain (shift-left compliance):
+    "fca_regulatory_impact": ["story_quality"],
+    "consumer_duty_mapper": ["fca_regulatory_impact"],
+    "compliance_ac_advisor": ["fca_regulatory_impact", "consumer_duty_mapper"],
+    "bdd_generator": ["story_quality", "three_amigos", "compliance_ac_advisor"],
     "ac_compliance": ["bdd_generator"],
     "apex_coverage": ["bdd_generator"],
     "test_execution_analyst": ["bdd_generator"],

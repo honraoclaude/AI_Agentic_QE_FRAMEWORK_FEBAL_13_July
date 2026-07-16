@@ -400,23 +400,31 @@ async def test_apex_coverage_not_deployable_below_floor(session, adapter):
 
 
 async def test_upstream_gathering_feeds_bdd(session, adapter):
-    """End-to-end: accepting Three Amigos makes its output available to the
-    BDD generator via the workflow's upstream gathering."""
+    """End-to-end: accepting the Refinement chain makes the upstream outputs BDD
+    declares (Story Quality, Three Amigos, Compliance-by-Design AC Advisor)
+    available via the workflow's upstream gathering."""
     story = await _seed(session, adapter)
-    for key in ("story_quality", "three_amigos"):
+    # Walk every Refinement agent up to (but not including) BDD, in sequence.
+    for key in (
+        "story_quality",
+        "fca_regulatory_impact",
+        "consumer_duty_mapper",
+        "compliance_ac_advisor",
+        "three_amigos",
+    ):
         run = await workflow.latest_run(session, story.id, key)
         await workflow.approve_and_run(session, run.id, approver="QE Lead")
         await workflow.accept_run(session, run.id, actor="QE Lead")
 
     gathered = await workflow._gather_upstream(session, story.id, "bdd_generator")
     keys = {u["agent_key"] for u in gathered}
-    assert keys == {"story_quality", "three_amigos"}
+    assert keys == {"story_quality", "three_amigos", "compliance_ac_advisor"}
 
     bdd = await workflow.latest_run(session, story.id, "bdd_generator")
     result = await workflow.approve_and_run(session, bdd.id, approver="QE Lead")
     # The run records which upstream agents it consumed.
     up = {u["agent_key"] for u in result.input_json["upstream"]}
-    assert up == {"story_quality", "three_amigos"}
+    assert up == {"story_quality", "three_amigos", "compliance_ac_advisor"}
     # And its scenarios trace to the Three Amigos rules.
     assert result.output_json["coverage"]["rules_total"] >= 1
 

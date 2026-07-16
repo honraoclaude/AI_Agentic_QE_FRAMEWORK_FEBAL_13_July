@@ -188,5 +188,5 @@ async def test_release_gate_attaches_audit_pack(session, adapter):
     assert pack["story"]["jira_key"] == "WLTH-101"
     assert len(pack["gates"]) == 4
     assert all(g["status"] == "SIGNED_OFF" for g in pack["gates"])
-    assert len(pack["agent_runs"]) == 12
+    assert len(pack["agent_runs"]) == 15
     assert pack["audit_chain_verification"]["valid"] is True

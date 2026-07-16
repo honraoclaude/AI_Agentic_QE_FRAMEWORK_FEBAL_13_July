@@ -41,10 +41,49 @@ AGENTS: dict[str, AgentDefinition] = {
             ),
         ),
         AgentDefinition(
+            key="fca_regulatory_impact",
+            name="FCA Regulatory Impact Assessor",
+            phase=Phase.REFINEMENT,
+            sequence=2,
+            pact=("Proactive", "Targeted"),
+            purpose=(
+                "Maps the story to the applicable FCA Handbook obligations "
+                "(COBS, PRIN/Consumer Duty, PROD, SYSC, DISP, SM&CR) with citations, "
+                "and proposes a reasoned FCA-impact rating for a human to confirm. "
+                "Seeds the regulatory signal the rest of the pipeline builds on."
+            ),
+        ),
+        AgentDefinition(
+            key="consumer_duty_mapper",
+            name="Consumer Duty Outcome Mapper",
+            phase=Phase.REFINEMENT,
+            sequence=3,
+            pact=("Proactive",),
+            purpose=(
+                "Assesses the story against the four Consumer Duty outcomes "
+                "(products & services, price & value, consumer understanding, "
+                "consumer support), applying the avoid-foreseeable-harm lens, and "
+                "flags which outcomes are unaddressed."
+            ),
+        ),
+        AgentDefinition(
+            key="compliance_ac_advisor",
+            name="Compliance-by-Design AC Advisor",
+            phase=Phase.REFINEMENT,
+            sequence=4,
+            pact=("Proactive", "Collaborative"),
+            purpose=(
+                "Turns the regulatory obligations and Consumer Duty gaps into "
+                "concrete, testable acceptance criteria (audit, suitability, "
+                "disclosure, consent, vulnerable-customer, record-keeping) — so "
+                "compliance enters the ACs before Three Amigos and BDD formalise them."
+            ),
+        ),
+        AgentDefinition(
             key="three_amigos",
             name="Three Amigos Facilitation Agent",
             phase=Phase.REFINEMENT,
-            sequence=2,
+            sequence=5,
             pact=("Collaborative",),
             purpose=(
                 "Builds shared understanding via Example Mapping (rules + "
@@ -58,7 +97,7 @@ AGENTS: dict[str, AgentDefinition] = {
             key="bdd_generator",
             name="BDD Scenario Generator",
             phase=Phase.REFINEMENT,
-            sequence=3,
+            sequence=6,
             pact=("Autonomous", "Targeted"),
             purpose=(
                 "Formalizes the Three Amigos example map into a commit-ready "

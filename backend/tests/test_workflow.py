@@ -54,12 +54,12 @@ async def test_story_bootstrap_proposes_agents_and_gates(session, adapter):
     assert all(g.status == GateStatus.LOCKED for g in gates)
 
     runs = await _runs_for(session, story.id, Phase.REFINEMENT)
-    assert len(runs) == 3
+    assert len(runs) == 6
     by_seq = {r.sequence: r for r in runs}
-    # Nothing runs automatically: first agent merely awaits human approval.
+    # Nothing runs automatically: first agent merely awaits human approval,
+    # every later agent stays locked until its predecessor is accepted.
     assert by_seq[1].status == RunStatus.AWAITING_APPROVAL
-    assert by_seq[2].status == RunStatus.PROPOSED
-    assert by_seq[3].status == RunStatus.PROPOSED
+    assert all(by_seq[s].status == RunStatus.PROPOSED for s in range(2, 7))
 
 
 async def test_agent_cannot_run_without_approval_state(session, adapter):
@@ -84,10 +84,10 @@ async def test_accept_unlocks_next_agent(session, adapter):
     await workflow.approve_and_run(session, first.id, approver="Test Lead")
     await workflow.accept_run(session, first.id, actor="Test Lead")
 
-    second = await workflow.latest_run(session, story.id, "three_amigos")
+    second = await workflow.latest_run(session, story.id, "fca_regulatory_impact")
     assert second.status == RunStatus.AWAITING_APPROVAL
-    third = await workflow.latest_run(session, story.id, "bdd_generator")
-    assert third.status == RunStatus.PROPOSED
+    later = await workflow.latest_run(session, story.id, "bdd_generator")
+    assert later.status == RunStatus.PROPOSED
 
 
 async def test_reject_requires_reason(session, adapter):
@@ -142,7 +142,7 @@ async def test_gate_ready_only_after_all_accepted_then_signoff_advances_phase(
         rationale="INVEST compliant, FCA impact classified HIGH, scenarios approved.",
     )
     assert gate.status == GateStatus.SIGNED_OFF
-    assert gate.evidence and len(gate.evidence["accepted_runs"]) == 3
+    assert gate.evidence and len(gate.evidence["accepted_runs"]) == 6
 
     # Story advanced exactly one phase; development agents proposed.
     assert story.current_phase == Phase.DEVELOPMENT
@@ -216,7 +216,7 @@ async def test_full_lifecycle_to_release(session, adapter):
     assert story.released is True
     assert story.current_phase == Phase.RELEASE
 
-    # 12 accepted runs, 4 signed gates.
+    # 15 accepted runs (6 Refinement + 3 + 3 + 3), 4 signed gates.
     runs = await _runs_for(session, story.id)
-    assert len(runs) == 12
+    assert len(runs) == 15
     assert all(r.status == RunStatus.ACCEPTED for r in runs)

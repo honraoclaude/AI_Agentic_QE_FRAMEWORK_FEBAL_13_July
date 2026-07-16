@@ -101,6 +101,190 @@ def story_quality(story: Story, artifacts=None) -> dict:
     }
 
 
+def fca_regulatory_impact(story: Story, artifacts=None, upstream=None) -> dict:
+    impact = _fca(story).split()[0]  # LOW / MEDIUM / HIGH (drop "(unconfirmed)")
+    if impact not in ("LOW", "MEDIUM", "HIGH"):
+        impact = "HIGH"
+    return {
+        "verdict": "WARN",
+        "summary": (
+            f"{story.jira_key} engages client-facing financial figures on "
+            f"{_cloud(story)}, so it sits within Consumer Duty and COBS "
+            "record-keeping. Proposed FCA impact "
+            f"{impact} — confirm at the Refinement gate."
+        ),
+        "findings": [
+            {
+                "title": "Client-facing figure accuracy in scope",
+                "detail": "PRIN 2A (Consumer Duty) requires client-facing figures to "
+                "be accurate and not cause foreseeable harm.",
+                "severity": "MEDIUM",
+            }
+        ],
+        "release_blocking": False,
+        "proposed_fca_impact": impact,
+        "impact_rationale": (
+            "The story recalculates a value shown to clients and touches financial "
+            "record-keeping; inaccuracy would risk a poor Consumer Duty outcome and "
+            "a COBS record-keeping breach — hence a material impact rating."
+        ),
+        "applicable_regulations": [
+            {
+                "handbook_ref": "PRIN 2A",
+                "area": "PRIN",
+                "obligation": "Deliver good outcomes for retail clients (Consumer Duty).",
+                "relevance": "The change alters a figure clients rely on.",
+            },
+            {
+                "handbook_ref": "COBS 9.2",
+                "area": "COBS",
+                "obligation": "Maintain suitability and adequate records of client-facing outputs.",
+                "relevance": "Recalculated figures must be evidenced and reproducible.",
+            },
+            {
+                "handbook_ref": "SYSC 9.1",
+                "area": "SYSC",
+                "obligation": "Keep orderly records sufficient to reconstruct decisions.",
+                "relevance": "Supports the 7-year audit trail for recalculations.",
+            },
+        ],
+        "key_risks": [
+            {
+                "title": "Unevidenced recalculation",
+                "detail": "Without an audit record, a challenged figure cannot be "
+                "reconstructed — a SYSC 9 / Consumer Duty exposure.",
+                "severity": "HIGH",
+            }
+        ],
+    }
+
+
+def consumer_duty_mapper(story: Story, artifacts=None, upstream=None) -> dict:
+    impact = _upstream_output(upstream, "fca_regulatory_impact") or {}
+    basis = (
+        " Building on the regulatory impact assessment"
+        if impact
+        else ""
+    )
+    outcomes = [
+        {
+            "outcome": "PRODUCTS_AND_SERVICES",
+            "status": "ADDRESSED",
+            "assessment": "The rollup serves the intended target market (households).",
+            "foreseeable_harm": None,
+            "gap": None,
+        },
+        {
+            "outcome": "PRICE_AND_VALUE",
+            "status": "NOT_APPLICABLE",
+            "assessment": "No fee or pricing change in this story.",
+            "foreseeable_harm": None,
+            "gap": None,
+        },
+        {
+            "outcome": "CONSUMER_UNDERSTANDING",
+            "status": "PARTIAL",
+            "assessment": "The recalculated figure is shown to clients, but rounding "
+            "and 'as-at' timing are not yet specified.",
+            "foreseeable_harm": "A client could misread an ambiguous or stale figure.",
+            "gap": "State rounding (half-up, 2dp) and the effective date shown.",
+        },
+        {
+            "outcome": "CONSUMER_SUPPORT",
+            "status": "NOT_ADDRESSED",
+            "assessment": "No criterion covers how a client queries or disputes the figure.",
+            "foreseeable_harm": "A vulnerable client may be unable to resolve a disputed value.",
+            "gap": "Add a support/dispute path and an audit record for challenges.",
+        },
+    ]
+    unaddressed = sum(1 for o in outcomes if o["status"] == "NOT_ADDRESSED")
+    return {
+        "verdict": "WARN",
+        "summary": (
+            f"{story.jira_key}: two of four Consumer Duty outcomes need work "
+            "(consumer understanding, consumer support)." + basis + "."
+        ),
+        "findings": [
+            {
+                "title": "Consumer support path missing",
+                "detail": "No AC covers querying/disputing a client-facing figure — a "
+                "foreseeable-harm risk for vulnerable customers.",
+                "severity": "MEDIUM",
+            }
+        ],
+        "release_blocking": False,
+        "outcomes": outcomes,
+        "unaddressed_count": unaddressed,
+        "cross_cutting_notes": (
+            "Act in good faith and avoid foreseeable harm: an inaccurate or "
+            "unexplained figure, or an unresolvable dispute, would breach the "
+            "cross-cutting obligations. Enable clients to pursue their objectives by "
+            "making the figure clear, timely and challengeable."
+        ),
+    }
+
+
+def compliance_ac_advisor(story: Story, artifacts=None, upstream=None) -> dict:
+    duty = _upstream_output(upstream, "consumer_duty_mapper") or {}
+    gaps_from_duty = [
+        o["gap"] for o in (duty.get("outcomes") or []) if o.get("gap")
+    ]
+    suggested = [
+        {
+            "criterion": "Every recalculation of a client-facing figure writes an "
+            "immutable audit record (who/what/when/inputs).",
+            "category": "AUDIT",
+            "regulatory_basis": "SYSC 9.1",
+            "priority": "MUST",
+        },
+        {
+            "criterion": "Monetary values are rounded half-up to 2 decimal places and "
+            "displayed with the effective 'as-at' date.",
+            "category": "DISCLOSURE",
+            "regulatory_basis": "PRIN 2A (Consumer Understanding)",
+            "priority": "MUST",
+        },
+        {
+            "criterion": "A client can raise a query on a displayed figure, and the "
+            "query is logged with an auditable response path.",
+            "category": "VULNERABLE_CUSTOMER",
+            "regulatory_basis": "PRIN 2A (Consumer Support)",
+            "priority": "MUST",
+        },
+        {
+            "criterion": "Only users with the appropriate permission set can trigger a "
+            "recalculation.",
+            "category": "ACCESS_CONTROL",
+            "regulatory_basis": "SYSC 3.2",
+            "priority": "RECOMMENDED",
+        },
+    ]
+    must = [c for c in suggested if c["priority"] == "MUST"]
+    coverage_gaps = gaps_from_duty or [
+        "No existing AC evidences record-keeping for recalculations.",
+        "No existing AC covers a client dispute/support path.",
+    ]
+    return {
+        "verdict": "WARN",
+        "summary": (
+            f"{len(suggested)} compliance acceptance criteria proposed for "
+            f"{story.jira_key} ({len(must)} MUST). Adopt before Three Amigos so BDD "
+            "can formalise them as @fca scenarios."
+        ),
+        "findings": [
+            {
+                "title": f"{len(must)} MUST-have compliance criteria missing",
+                "detail": "Audit record, rounding/disclosure, and a consumer-support "
+                "path are required for a compliant, testable story.",
+                "severity": "MEDIUM",
+            }
+        ],
+        "release_blocking": False,
+        "suggested_criteria": suggested,
+        "coverage_gaps": coverage_gaps,
+    }
+
+
 def three_amigos(story: Story, artifacts=None) -> dict:
     cloud = _cloud(story)
     high = story.fca_impact is None or story.fca_impact.value in ("MEDIUM", "HIGH")
@@ -1467,6 +1651,9 @@ def regulatory_audit_trail(story: Story, artifacts=None) -> dict:
 
 GENERATORS = {
     "story_quality": story_quality,
+    "fca_regulatory_impact": fca_regulatory_impact,
+    "consumer_duty_mapper": consumer_duty_mapper,
+    "compliance_ac_advisor": compliance_ac_advisor,
     "three_amigos": three_amigos,
     "bdd_generator": bdd_generator,
     "ac_compliance": ac_compliance,
