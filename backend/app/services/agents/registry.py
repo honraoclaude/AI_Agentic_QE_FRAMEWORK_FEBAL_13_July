@@ -151,6 +151,33 @@ AGENTS: dict[str, AgentDefinition] = {
             ),
             prompt_version="v2",
         ),
+        AgentDefinition(
+            key="code_review",
+            name="Automated Code Review Agent",
+            phase=Phase.DEVELOPMENT,
+            sequence=4,
+            pact=("Autonomous", "Collaborative"),
+            purpose=(
+                "Automated peer review: complexity and maintainability metrics "
+                "(cyclomatic complexity, method length, duplication), categorised "
+                "review comments with concrete suggestions, complexity hotspots, and "
+                "an APPROVE / COMMENT / REQUEST_CHANGES recommendation — the standards "
+                "layer above raw static analysis."
+            ),
+        ),
+        AgentDefinition(
+            key="deployability_validation",
+            name="Deployability Validation Agent",
+            phase=Phase.DEVELOPMENT,
+            sequence=5,
+            pact=("Proactive", "Targeted"),
+            purpose=(
+                "Validate-only deployment check: does the change set compile and "
+                "deploy to the target org? Reports component-level errors, the "
+                "validation test run, and a clear deployable / not-deployable verdict "
+                "with blockers — the build gate before promotion."
+            ),
+        ),
         # --- Phase 3: Testing ---
         AgentDefinition(
             key="test_execution_analyst",

@@ -147,7 +147,7 @@ async def test_gate_ready_only_after_all_accepted_then_signoff_advances_phase(
     # Story advanced exactly one phase; development agents proposed.
     assert story.current_phase == Phase.DEVELOPMENT
     dev_runs = await _runs_for(session, story.id, Phase.DEVELOPMENT)
-    assert len(dev_runs) == 3
+    assert len(dev_runs) == 5
     assert (
         await workflow.latest_run(session, story.id, "ac_compliance")
     ).status == RunStatus.AWAITING_APPROVAL
@@ -216,7 +216,7 @@ async def test_full_lifecycle_to_release(session, adapter):
     assert story.released is True
     assert story.current_phase == Phase.RELEASE
 
-    # 15 accepted runs (6 Refinement + 3 + 3 + 3), 4 signed gates.
+    # 17 accepted runs (6 Refinement + 5 Development + 3 Testing + 3 Release).
     runs = await _runs_for(session, story.id)
-    assert len(runs) == 15
+    assert len(runs) == 17
     assert all(r.status == RunStatus.ACCEPTED for r in runs)

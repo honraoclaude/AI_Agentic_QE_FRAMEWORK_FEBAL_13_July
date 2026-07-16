@@ -1138,6 +1138,172 @@ def static_analysis(story: Story, artifacts=None) -> dict:
     }
 
 
+def _num_or_none(text: str):
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+_REVIEW_CAT = {
+    "AvoidSoqlInLoops": ("COMPLEXITY", "Move the SOQL outside the loop and bulkify."),
+    "ApexCRUDViolation": ("BEST_PRACTICE", "Enforce CRUD/FLS via WITH SECURITY_ENFORCED."),
+    "EmptyCatchBlock": ("ERROR_HANDLING", "Log the exception or rethrow — never swallow it."),
+    "ExcessiveClassLength": ("DESIGN", "Split responsibilities into smaller classes."),
+    "MethodNamingConventions": ("NAMING", "Rename to a clear camelCase verb phrase."),
+}
+
+
+def code_review(story: Story, artifacts=None) -> dict:
+    sarif = _parsed(artifacts, "SARIF")
+    meta = _parsed(artifacts, "METADATA")
+    note = _artifact_note(artifacts, "SARIF") or _artifact_note(artifacts, "METADATA")
+    components = (meta or {}).get("components", []) if meta else []
+    files_reviewed = max(len(components), 3)
+
+    comments: list[dict] = []
+    if sarif and sarif.get("findings"):
+        for f in sarif["findings"][:6]:
+            cat, suggestion = _REVIEW_CAT.get(
+                f["rule"], ("BEST_PRACTICE", "Address the flagged pattern.")
+            )
+            comments.append(
+                {
+                    "file": (f.get("location") or "unknown").split(":")[0],
+                    "line": _num_or_none((f.get("location") or "").split(":")[-1]),
+                    "category": cat,
+                    "severity": _LEVEL_TO_SEV.get(f.get("level"), "MEDIUM"),
+                    "comment": f.get("message") or f["rule"],
+                    "suggestion": suggestion,
+                }
+            )
+    # Design/maintainability comments the scanner cannot make.
+    comments.append(
+        {
+            "file": "HouseholdRollupService.cls",
+            "line": 142,
+            "category": "COMPLEXITY",
+            "severity": "MEDIUM",
+            "comment": "recalculate() mixes querying, aggregation and DML in one method.",
+            "suggestion": "Extract a bulkified query helper and a pure aggregation method.",
+        }
+    )
+    comments.append(
+        {
+            "file": "HouseholdRollupServiceTest.cls",
+            "line": None,
+            "category": "TEST_DESIGN",
+            "severity": "MEDIUM",
+            "comment": "No 200-record bulk test for the trigger path.",
+            "suggestion": "Add a bulk test asserting governor-safe behaviour at scale.",
+        }
+    )
+
+    high = sum(1 for c in comments if c["severity"] in ("HIGH", "CRITICAL"))
+    if high:
+        rec, verdict = "REQUEST_CHANGES", "FAIL"
+    elif comments:
+        rec, verdict = "COMMENT", "WARN"
+    else:
+        rec, verdict = "APPROVE", "PASS"
+
+    hotspots = [
+        {
+            "unit": "HouseholdRollupService.recalculate",
+            "complexity": 17,
+            "recommendation": "Decompose; target cyclomatic complexity < 10.",
+        }
+    ]
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"Automated review of {files_reviewed} file(s){note}: {len(comments)} "
+            f"comment(s), {high} needing changes. Recommendation: {rec}."
+        ),
+        "findings": [
+            {"title": f"{c['category'].title()} — {c['file']}", "detail": c["comment"],
+             "severity": c["severity"]}
+            for c in comments
+            if c["severity"] in ("HIGH", "CRITICAL")
+        ][:5],
+        "release_blocking": False,
+        "approval_recommendation": rec,
+        "metrics": {
+            "files_reviewed": files_reviewed,
+            "max_cyclomatic_complexity": 17,
+            "avg_method_lines": 34,
+            "duplication_percent": 4.2,
+        },
+        "review_comments": comments,
+        "complexity_hotspots": hotspots,
+    }
+
+
+def deployability_validation(story: Story, artifacts=None) -> dict:
+    meta = _parsed(artifacts, "METADATA")
+    junit = _parsed(artifacts, "JUNIT")
+    note = _artifact_note(artifacts, "METADATA") or _artifact_note(artifacts, "JUNIT")
+    components = (meta or {}).get("components", []) if meta else []
+    total = max(len(components), 3)
+
+    # A failed validation test run means the package validation fails.
+    failed_tests = int((junit or {}).get("failed", 0)) if junit else 0
+    test_run = (
+        {
+            "total": int(junit.get("total", 0)),
+            "passed": int(junit.get("passed", 0)),
+            "failed": failed_tests,
+        }
+        if junit
+        else None
+    )
+
+    component_errors: list[dict] = []
+    blockers: list[str] = []
+    if failed_tests:
+        component_errors.append(
+            {
+                "component": "HouseholdRollupService",
+                "component_type": "ApexClass",
+                "problem": f"{failed_tests} validation test(s) failed — deployment aborted.",
+                "line": None,
+            }
+        )
+        blockers.append(f"{failed_tests} Apex test failure(s) in the validation run.")
+
+    failed = len(component_errors)
+    deployed = total - failed
+    if failed:
+        status, deployable, verdict = "FAILED", False, "FAIL"
+    elif junit or meta:
+        status, deployable, verdict = "SUCCEEDED", True, "PASS"
+    else:
+        status, deployable, verdict = "PARTIAL", True, "WARN"
+        blockers.append("No deployment manifest uploaded — result is indicative only.")
+
+    return {
+        "verdict": verdict,
+        "summary": (
+            f"Validate-only deploy to Integration{note}: {status.lower()} — "
+            f"{deployed}/{total} component(s) deploy"
+            + (f", {failed_tests} test failure(s)." if failed_tests else ".")
+        ),
+        "findings": [
+            {"title": f"Deploy error: {e['component']}", "detail": e["problem"],
+             "severity": "HIGH"}
+            for e in component_errors
+        ],
+        "release_blocking": False,
+        "deployable": deployable,
+        "validation_status": status,
+        "target_env": "Integration",
+        "components": {"total": total, "deployed": deployed, "failed": failed},
+        "component_errors": component_errors,
+        "test_run": test_run,
+        "blockers": blockers,
+    }
+
+
 # --- Phase 3: Testing (artifact consumers) ------------------------------
 
 
@@ -1659,6 +1825,8 @@ GENERATORS = {
     "ac_compliance": ac_compliance,
     "apex_coverage": apex_coverage,
     "static_analysis": static_analysis,
+    "code_review": code_review,
+    "deployability_validation": deployability_validation,
     "test_execution_analyst": test_execution_analyst,
     "financial_data_integrity": financial_data_integrity,
     "regression_scope": regression_scope,

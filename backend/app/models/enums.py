@@ -72,6 +72,8 @@ AGENT_ARTIFACT_KINDS: dict[str, list[ArtifactKind]] = {
     "ac_compliance": [ArtifactKind.METADATA],
     "apex_coverage": [ArtifactKind.COVERAGE, ArtifactKind.METADATA],
     "static_analysis": [ArtifactKind.SARIF, ArtifactKind.METADATA],
+    "code_review": [ArtifactKind.SARIF, ArtifactKind.METADATA],
+    "deployability_validation": [ArtifactKind.METADATA, ArtifactKind.JUNIT],
     "test_execution_analyst": [ArtifactKind.JUNIT],
     "financial_data_integrity": [ArtifactKind.FINANCIAL],
     "regression_scope": [ArtifactKind.METADATA],

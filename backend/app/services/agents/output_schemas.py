@@ -458,6 +458,81 @@ class StaticAnalysisOutput(AgentOutputBase):
     quality_gate: QualityGate
 
 
+# --- Development: Automated Code Review ----------------------------------
+
+
+class ReviewComment(BaseModel):
+    file: str
+    line: int | None = None
+    category: Literal[
+        "COMPLEXITY",
+        "NAMING",
+        "DUPLICATION",
+        "BEST_PRACTICE",
+        "DESIGN",
+        "ERROR_HANDLING",
+        "READABILITY",
+        "TEST_DESIGN",
+    ]
+    severity: Severity
+    comment: str
+    suggestion: str
+
+
+class CodeMetrics(BaseModel):
+    files_reviewed: int
+    max_cyclomatic_complexity: int
+    avg_method_lines: int
+    duplication_percent: float
+
+
+class ComplexityHotspot(BaseModel):
+    unit: str = Field(description="Class.method or component")
+    complexity: int
+    recommendation: str
+
+
+class CodeReviewOutput(AgentOutputBase):
+    approval_recommendation: Literal["APPROVE", "COMMENT", "REQUEST_CHANGES"]
+    metrics: CodeMetrics
+    review_comments: list[ReviewComment]
+    complexity_hotspots: list[ComplexityHotspot]
+
+
+# --- Development: Deployability Validation (validate-only deploy) ---------
+
+
+class DeployComponents(BaseModel):
+    total: int
+    deployed: int
+    failed: int
+
+
+class ComponentError(BaseModel):
+    component: str
+    component_type: str
+    problem: str
+    line: int | None = None
+
+
+class DeployTestRun(BaseModel):
+    total: int
+    passed: int
+    failed: int
+
+
+class DeployabilityValidationOutput(AgentOutputBase):
+    deployable: bool
+    validation_status: Literal["SUCCEEDED", "FAILED", "PARTIAL"]
+    target_env: str
+    components: DeployComponents
+    component_errors: list[ComponentError]
+    test_run: DeployTestRun | None = None
+    blockers: list[str] = Field(
+        description="Concrete reasons the package cannot deploy as-is"
+    )
+
+
 # --- Phase 3: Testing ----------------------------------------------------
 
 
@@ -640,6 +715,8 @@ OUTPUT_SCHEMAS: dict[str, type[AgentOutputBase]] = {
     "ac_compliance": AcComplianceOutput,
     "apex_coverage": ApexCoverageOutput,
     "static_analysis": StaticAnalysisOutput,
+    "code_review": CodeReviewOutput,
+    "deployability_validation": DeployabilityValidationOutput,
     "test_execution_analyst": TestExecutionOutput,
     "financial_data_integrity": FinancialIntegrityOutput,
     "regression_scope": RegressionScopeOutput,

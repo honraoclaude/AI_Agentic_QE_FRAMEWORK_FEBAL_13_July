@@ -592,6 +592,89 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       );
     }
 
+    // Automated Code Review: categorised review comments with suggestions.
+    if (
+      value.every(
+        (v) =>
+          typeof v === "object" &&
+          v !== null &&
+          "category" in v &&
+          "suggestion" in v &&
+          "comment" in v,
+      )
+    ) {
+      const sevCls: Record<string, string> = {
+        CRITICAL: "border-bad/50 bg-bad/10 text-bad",
+        HIGH: "border-bad/50 bg-bad/10 text-bad",
+        MEDIUM: "border-warn/50 bg-warn/10 text-warn",
+        LOW: "border-line text-ink-dim",
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          {value.map((v, i) => {
+            const c = v as {
+              file: string;
+              line?: number | null;
+              category: string;
+              severity: string;
+              comment: string;
+              suggestion: string;
+            };
+            return (
+              <div key={i} className="rounded border border-line bg-bg/50 p-2">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Badge className={sevCls[c.severity] ?? "border-line text-ink-dim"}>
+                    {c.severity}
+                  </Badge>
+                  <span className="font-mono text-[10px] text-ink-faint">
+                    {c.category.replaceAll("_", " ").toLowerCase()}
+                  </span>
+                  <span className="font-mono text-[10px] text-accent">
+                    {c.file}
+                    {c.line ? `:${c.line}` : ""}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink">{c.comment}</div>
+                <div className="mt-0.5 text-[10px] text-ok">▸ {c.suggestion}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Deployability Validation: per-component deploy errors.
+    if (
+      value.every(
+        (v) => typeof v === "object" && v !== null && "component" in v && "problem" in v,
+      )
+    ) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          {value.map((v, i) => {
+            const e = v as {
+              component: string;
+              component_type: string;
+              problem: string;
+              line?: number | null;
+            };
+            return (
+              <div key={i} className="rounded border border-bad/40 bg-bad/5 p-2">
+                <div className="mb-0.5 flex items-center gap-1.5">
+                  <span className="font-mono text-[11px] text-bad">{e.component}</span>
+                  <span className="font-mono text-[10px] text-ink-faint">
+                    {e.component_type}
+                    {e.line ? `:${e.line}` : ""}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink-dim">{e.problem}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // FCA Regulatory Impact: applicable Handbook obligations.
     if (
       value.every(
