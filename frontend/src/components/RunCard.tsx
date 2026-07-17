@@ -73,6 +73,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
               tags?: string[];
               covers?: string[];
               ac_refs?: string[];
+              example_refs?: string[];
               gherkin: string;
             };
             const auto = sc.automation;
@@ -88,6 +89,11 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
                     <Badge key={r} className="border-accent/40 bg-accent/10 text-accent">
                       {r}
                     </Badge>
+                  ))}
+                  {(sc.example_refs ?? []).map((r) => (
+                    <span key={r} className="font-mono text-[10px] text-ink-faint">
+                      {r}
+                    </span>
                   ))}
                   {sc.level && (
                     <Badge className="border-line text-ink-dim">{sc.level}</Badge>
@@ -1016,27 +1022,152 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       );
     }
 
-    // Example Mapping: rule cards each with their example bullets.
+    // Example Mapping: rule cards (AC-anchored) each with typed example cards.
     if (
       value.every(
         (v) => typeof v === "object" && v !== null && "rule" in v && "examples" in v,
       )
     ) {
+      const KIND_CLS: Record<string, string> = {
+        HAPPY: "text-ok",
+        NEGATIVE: "text-warn",
+        BOUNDARY: "text-accent",
+      };
       return (
         <div className="flex flex-col gap-2">
           {value.map((v, i) => {
-            const em = v as { rule: string; examples: string[] };
+            const em = v as {
+              rule: string;
+              ac_refs?: string[];
+              examples: Array<
+                string | { id?: string; text: string; kind?: string; fca?: boolean }
+              >;
+            };
             return (
               <div key={i} className="rounded border border-line bg-bg/50 p-2">
-                <div className="mb-1 flex items-start gap-1.5 text-[11px] font-medium text-ink">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-ink">
                   <span className="text-accent">▸</span>
                   {em.rule}
-                </div>
-                <ul className="ml-3 list-inside list-disc space-y-0.5 text-[11px] text-ink-dim">
-                  {(em.examples ?? []).map((ex, j) => (
-                    <li key={j}>{ex}</li>
+                  {(em.ac_refs ?? []).map((r) => (
+                    <Badge key={r} className="border-accent/50 bg-accent/10 text-accent">
+                      {r}
+                    </Badge>
                   ))}
+                </div>
+                <ul className="ml-3 space-y-0.5 text-[11px] text-ink-dim">
+                  {(em.examples ?? []).map((ex, j) => {
+                    if (typeof ex === "string")
+                      return (
+                        <li key={j} className="list-inside list-disc">
+                          {ex}
+                        </li>
+                      );
+                    return (
+                      <li key={j} className="flex flex-wrap items-center gap-1.5">
+                        {ex.id && (
+                          <span className="font-mono text-[10px] text-ink-faint">
+                            {ex.id}
+                          </span>
+                        )}
+                        {ex.kind && (
+                          <span
+                            className={`font-mono text-[10px] ${KIND_CLS[ex.kind] ?? "text-ink-faint"}`}
+                          >
+                            {ex.kind.toLowerCase()}
+                          </span>
+                        )}
+                        {ex.fca && (
+                          <Badge className="border-bad/50 bg-bad/10 text-bad">FCA</Badge>
+                        )}
+                        <span>{ex.text}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Definition of Done: checkable contract — each item mapped to its verifier.
+    if (
+      value.every(
+        (v) => typeof v === "object" && v !== null && "item" in v && "verified_by" in v,
+      )
+    ) {
+      return (
+        <div className="flex flex-col gap-1">
+          {value.map((v, i) => {
+            const d = v as { item: string; verified_by: string; fca_evidence?: boolean };
+            const manual = !d.verified_by || d.verified_by === "MANUAL";
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="text-ink">{d.item}</span>
+                {d.fca_evidence && (
+                  <Badge className="border-bad/50 bg-bad/10 text-bad">FCA</Badge>
+                )}
+                <span
+                  className={`font-mono text-[10px] ${manual ? "text-ink-faint" : "text-accent"}`}
+                >
+                  ✓ {manual ? "manual" : d.verified_by.replaceAll("_", " ")}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Agreements: decision-records with the audit "why".
+    if (
+      value.every((v) => typeof v === "object" && v !== null && "decision" in v)
+    ) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          {value.map((v, i) => {
+            const a = v as { decision: string; rationale?: string };
+            return (
+              <div key={i} className="text-[11px]">
+                <div className="text-ink">{a.decision}</div>
+                {a.rationale && (
+                  <div className="ml-3 text-[10px] italic text-ink-faint">
+                    why: {a.rationale}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Open questions: owned + blocking-aware.
+    if (
+      value.every((v) => typeof v === "object" && v !== null && "question" in v)
+    ) {
+      return (
+        <div className="flex flex-col gap-1">
+          {value.map((v, i) => {
+            const q = v as {
+              question: string;
+              owner_persona?: string;
+              blocking?: boolean;
+            };
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                {q.blocking && (
+                  <Badge className="border-bad/70 bg-bad/20 font-bold text-bad">
+                    BLOCKING
+                  </Badge>
+                )}
+                <span className="text-ink">{q.question}</span>
+                {q.owner_persona && (
+                  <span className="font-mono text-[10px] text-ink-faint">
+                    → {q.owner_persona.replaceAll("_", " ").toLowerCase()}
+                  </span>
+                )}
               </div>
             );
           })}

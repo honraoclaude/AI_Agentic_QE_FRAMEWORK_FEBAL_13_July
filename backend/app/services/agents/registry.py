@@ -86,12 +86,13 @@ AGENTS: dict[str, AgentDefinition] = {
             sequence=5,
             pact=("Collaborative",),
             purpose=(
-                "Builds shared understanding via Example Mapping (rules + "
-                "examples), a story-tailored Definition of Done with FCA "
-                "compliance evidence, an agreements log, risks, and open "
-                "questions per persona. Feeds the BDD Scenario Generator."
+                "Builds shared understanding via Example Mapping (AC-anchored "
+                "rules + typed example cards), a Definition of Done mapped to "
+                "the verifying agents, decision-record agreements, risks, and "
+                "owned open questions (blocking-aware). Feeds the BDD Scenario "
+                "Generator."
             ),
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         AgentDefinition(
             key="bdd_generator",
@@ -103,9 +104,11 @@ AGENTS: dict[str, AgentDefinition] = {
                 "Formalizes the Three Amigos example map into a commit-ready "
                 ".feature file: positive/negative/edge scenarios classified by "
                 "type and priority, per-scenario automation recommendations, "
-                "rule/AC traceability, and a coverage matrix (Gate 1 evidence)."
+                "rule/AC/example-card traceability with a deterministic "
+                "every-example-covered check, and a coverage matrix (Gate 1 "
+                "evidence)."
             ),
-            prompt_version="v3",
+            prompt_version="v4",
         ),
         # --- Phase 2: Development ---
         AgentDefinition(

@@ -232,6 +232,41 @@ def find_inconsistencies(latest: dict[str, AgentRun]) -> list[dict]:
                 f"{_agent_name(key)} raised a release-blocking result with LOW confidence.",
                 "Verify the evidence before treating this as a hard block."))
 
+    # 8. BDD drafted while a blocking open question is unresolved.
+    if "three_amigos" in o and "bdd_generator" in o:
+        blocking_qs = [
+            q.get("question", "")
+            for q in o["three_amigos"].get("open_questions", [])
+            if isinstance(q, dict) and q.get("blocking")
+        ]
+        if blocking_qs:
+            issues.append(_inconsistency(
+                "blocking_question_vs_bdd", "MEDIUM",
+                ["Three Amigos Facilitation", "BDD Scenario Generator"],
+                f"BDD scenarios were drafted while {len(blocking_qs)} blocking open "
+                f"question(s) remain unresolved (e.g. \"{blocking_qs[0][:120]}\").",
+                "Answer the blocking question and confirm the drafted scenarios "
+                "still assert the right behaviour."))
+
+    # 9. A Definition-of-Done item is verified by an agent that is failing.
+    if "three_amigos" in o:
+        failing = []
+        for item in o["three_amigos"].get("definition_of_done", []):
+            if not isinstance(item, dict):
+                continue  # legacy string DoD — nothing to check
+            vb = item.get("verified_by", "MANUAL")
+            if vb in o and vb != "MANUAL" and _verdict(o[vb]) == "FAIL":
+                failing.append((item.get("item", ""), vb))
+        if failing:
+            issues.append(_inconsistency(
+                "dod_verifier_failing", "MEDIUM",
+                ["Three Amigos Facilitation"] + sorted({_agent_name(vb) for _, vb in failing}),
+                f"{len(failing)} Definition-of-Done item(s) cannot currently be met — "
+                f"the verifying agent is failing (e.g. \"{failing[0][0][:100]}\" ← "
+                f"{_agent_name(failing[0][1])}).",
+                "The DoD is a checkable contract: resolve the failing agent's "
+                "findings or renegotiate the DoD item before sign-off."))
+
     sev_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     issues.sort(key=lambda i: sev_rank.get(i["severity"], 3))
     return issues

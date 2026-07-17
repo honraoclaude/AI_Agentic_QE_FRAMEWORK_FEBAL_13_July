@@ -348,59 +348,153 @@ def compliance_ac_advisor(story: Story, artifacts=None, upstream=None) -> dict:
 def three_amigos(story: Story, artifacts=None) -> dict:
     cloud = _cloud(story)
     high = story.fca_impact is None or story.fca_impact.value in ("MEDIUM", "HIGH")
+    acs = _ac_items(story)
+
+    def refs(text: str) -> list[str]:
+        return [_ac_ref_for(text, acs)] if acs else []
+
     dod = [
-        "All Example Mapping examples covered by approved BDD scenarios",
-        "Apex/unit coverage meets the 85% org policy with meaningful assertions",
-        "Code reviewed and static analysis clean of HIGH/CRITICAL issues",
-        "Deployed through the Copado pipeline to UAT",
-        "Story documentation / runbook updated where behaviour changed",
+        {
+            "item": "All Example Mapping examples covered by approved BDD scenarios",
+            "verified_by": "bdd_generator",
+            "fca_evidence": False,
+        },
+        {
+            "item": "Apex/unit coverage meets the 85% org policy with meaningful assertions",
+            "verified_by": "apex_coverage",
+            "fca_evidence": False,
+        },
+        {
+            "item": "Code review recommendation is APPROVE (or comments resolved)",
+            "verified_by": "code_review",
+            "fca_evidence": False,
+        },
+        {
+            "item": "Static analysis clean of HIGH/CRITICAL issues",
+            "verified_by": "static_analysis",
+            "fca_evidence": False,
+        },
+        {
+            "item": "Deployed through the Copado pipeline to UAT",
+            "verified_by": "deployability_validation",
+            "fca_evidence": False,
+        },
+        {
+            "item": "Story documentation / runbook updated where behaviour changed",
+            "verified_by": "MANUAL",
+            "fca_evidence": False,
+        },
     ]
     if high:
         dod = [
-            "Reconciliation vs finance extract attached (0.00 variance)",
-            "[FCA] scenarios executed and evidence captured for Gate 3",
-            "Immutable audit record for recalculation verified",
+            {
+                "item": "Reconciliation vs finance extract attached (tolerance per the "
+                "agreed answer to Q2)",
+                "verified_by": "financial_data_integrity",
+                "fca_evidence": True,
+            },
+            {
+                "item": "FCA-flagged scenarios executed and evidence captured for Gate 3",
+                "verified_by": "test_execution_analyst",
+                "fca_evidence": True,
+            },
+            {
+                "item": "Immutable audit record for recalculation verified",
+                "verified_by": "test_execution_analyst",
+                "fca_evidence": True,
+            },
         ] + dod
     return {
         "verdict": "PASS",
         "summary": (
             f"Shared understanding captured for {story.jira_key} via Example "
-            "Mapping. Two decisions agreed; one open question on pending-account "
-            "treatment remains before BDD drafting."
+            "Mapping. Three decisions agreed; one BLOCKING open question "
+            "(reconciliation tolerance) must be answered before BDD drafting."
         ),
         "findings": [],
         "release_blocking": False,
         "example_map": [
             {
                 "rule": "The rollup includes only active household financial accounts",
+                "ac_refs": refs("rollup includes only active household accounts"),
                 "examples": [
-                    "Household with active accounts 500000.00, 250000.00, 125000.00 GBP "
-                    "→ rollup 875000.00 GBP",
-                    "A closed account of 90000.00 GBP is excluded from the total",
-                    "[FCA] A pending (unsettled) account is excluded until it settles",
+                    {
+                        "id": "EX-1.1",
+                        "text": "Household with active accounts 500000.00, 250000.00, "
+                        "125000.00 GBP → rollup 875000.00 GBP",
+                        "kind": "HAPPY",
+                        "fca": False,
+                    },
+                    {
+                        "id": "EX-1.2",
+                        "text": "A closed account of 90000.00 GBP is excluded from the total",
+                        "kind": "NEGATIVE",
+                        "fca": False,
+                    },
+                    {
+                        "id": "EX-1.3",
+                        "text": "A pending (unsettled) account is excluded until it settles",
+                        "kind": "NEGATIVE",
+                        "fca": True,
+                    },
                 ],
             },
             {
                 "rule": "Monetary values use half-up rounding to 2 decimal places (GBP)",
+                "ac_refs": refs("monetary values rounded half-up 2 decimal places"),
                 "examples": [
-                    "1249.995 rounds to 1250.00",
-                    "A sum of many balances reconciles to finance within 0.00 variance",
+                    {
+                        "id": "EX-2.1",
+                        "text": "1249.995 rounds to 1250.00",
+                        "kind": "BOUNDARY",
+                        "fca": False,
+                    },
+                    {
+                        "id": "EX-2.2",
+                        "text": "A sum of many balances reconciles to the finance extract "
+                        "(tolerance TBC — Q2)",
+                        "kind": "HAPPY",
+                        "fca": False,
+                    },
                 ],
             },
             {
                 "rule": "Every recalculation is evidenced for audit",
+                "ac_refs": refs("recalculation evidenced audit record"),
                 "examples": [
-                    "[FCA] A balance change of 10000.00 GBP writes an immutable record "
-                    "of old and new value, retained 7 years",
-                    "Recalculation completes within 5 minutes of the balance change",
+                    {
+                        "id": "EX-3.1",
+                        "text": "A balance change of 10000.00 GBP writes an immutable "
+                        "record of old and new value, retained 7 years",
+                        "kind": "HAPPY",
+                        "fca": True,
+                    },
+                    {
+                        "id": "EX-3.2",
+                        "text": "Recalculation completes within 5 minutes of the balance change",
+                        "kind": "BOUNDARY",
+                        "fca": False,
+                    },
                 ],
             },
         ],
         "definition_of_done": dod,
         "agreements": [
-            "Pending (not-yet-settled) accounts are excluded from the figure",
-            "GBP rounding is half-up to 2 decimal places",
-            "Regulatory-evidence examples are tagged [FCA] for Gate 3 traceability",
+            {
+                "decision": "Pending (not-yet-settled) accounts are excluded from the figure",
+                "rationale": "Unsettled funds are not realisable net worth; including "
+                "them would overstate a client-facing figure (Consumer Duty).",
+            },
+            {
+                "decision": "GBP rounding is half-up to 2 decimal places",
+                "rationale": "Matches the finance system's convention so reconciliation "
+                "compares like-for-like.",
+            },
+            {
+                "decision": "Regulatory-evidence examples carry the fca flag for Gate 3",
+                "rationale": "Machine-readable flag makes Gate 3 evidence selection "
+                "deterministic instead of a string-tag convention.",
+            },
         ],
         "risks": [
             {
@@ -420,8 +514,18 @@ def three_amigos(story: Story, artifacts=None) -> dict:
             },
         ],
         "open_questions": [
-            "Are pending (not-yet-settled) accounts ever shown, or always excluded?",
-            "What reconciliation tolerance (if any) is acceptable vs the finance extract?",
+            {
+                "question": "Are pending (not-yet-settled) accounts ever shown to the "
+                "client (e.g. greyed out), or fully hidden? Calculation exclusion is agreed.",
+                "owner_persona": "PRODUCT_OWNER",
+                "blocking": False,
+            },
+            {
+                "question": "Q2: What reconciliation tolerance (if any) is acceptable "
+                "vs the finance extract?",
+                "owner_persona": "PRODUCT_OWNER",
+                "blocking": True,
+            },
         ],
         "persona_prompts": {
             "product_owner": [
@@ -436,15 +540,16 @@ def three_amigos(story: Story, artifacts=None) -> dict:
             ],
             "quality_engineer": [
                 "What household test data do we need seeded in the QA sandbox?",
-                "Which examples are regulatory-evidence scenarios (tag [FCA])?",
+                "Which examples are regulatory-evidence scenarios (fca flag)?",
                 "Can this be verified at unit/API level to keep UI tests minimal?",
             ],
         },
         "refinement_summary": (
-            "Team mapped 3 rules with concrete examples and agreed pending-account "
-            "exclusion and half-up rounding. Definition of Done includes FCA evidence "
-            "items for Gate 3. Remaining open question: reconciliation tolerance. "
-            "Ready to draft BDD scenarios once the PO confirms."
+            "Team mapped 3 rules (7 example cards, 2 FCA-flagged) anchored to the "
+            "acceptance criteria, and agreed pending-account exclusion and half-up "
+            "rounding with rationale. Definition of Done items are mapped to the "
+            "verifying agents. BLOCKING before BDD drafting: the PO must answer Q2 "
+            "(reconciliation tolerance)."
         ),
     }
 
@@ -469,9 +574,19 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
     ta = _upstream_output(upstream, "three_amigos")
     rules = [r.get("rule", "") for r in (ta or {}).get("example_map", [])] if ta else []
     chained = bool(rules)
+    # Example cards (structured green cards) — the machine-readable anchors.
+    cards_by_rule = [
+        [ex.get("id", "") for ex in r.get("examples", []) if isinstance(ex, dict) and ex.get("id")]
+        for r in ((ta or {}).get("example_map", []) if ta else [])
+    ]
+    all_card_ids = [cid for row in cards_by_rule for cid in row]
 
     def rule(i: int, fallback: str) -> str:
         return rules[i] if len(rules) > i else fallback
+
+    def cards(i: int, *js: int) -> list[str]:
+        row = cards_by_rule[i] if len(cards_by_rule) > i else []
+        return [row[j] for j in js if len(row) > j]
 
     specs = [
         {
@@ -488,6 +603,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             },
             "extra_tags": ["@smoke"],
             "covers": [rule(0, "AC: rollup sums active accounts")],
+            "example_refs": cards(0, 0),
             "gherkin": (
                 "Scenario: Rollup sums only active household accounts\n"
                 f"  Given a household on {cloud} with 3 active financial accounts "
@@ -512,6 +628,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             },
             "extra_tags": ["@regression"],
             "covers": [rule(0, "AC: exclude closed/pending")],
+            "example_refs": cards(0, 1, 2),
             "gherkin": (
                 "Scenario Outline: Non-active accounts do not affect the rollup\n"
                 "  Given an account in state <state>\n"
@@ -537,6 +654,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             },
             "extra_tags": [],
             "covers": [rule(1, "AC: rounding half-up 2dp")],
+            "example_refs": cards(1, 0),
             "gherkin": (
                 "Scenario: Half-up rounding at the 2dp boundary\n"
                 "  Given a computed household value of 1249.995 GBP\n"
@@ -558,6 +676,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             },
             "extra_tags": ["@fca"],
             "covers": [rule(2, "AC: recalculation is evidenced")],
+            "example_refs": cards(2, 0),
             "gherkin": (
                 "Scenario: Recalculation is evidenced for audit\n"
                 "  Given an account balance changes by 10000.00 GBP\n"
@@ -581,6 +700,7 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             },
             "extra_tags": [],
             "covers": [rule(2, "AC: recalculates within 5 minutes")],
+            "example_refs": cards(2, 1),
             "gherkin": (
                 "Scenario: Recalculation completes within the SLA\n"
                 "  Given an account balance changes\n"
@@ -607,9 +727,14 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
                 "tags": _bdd_tags(spec),
                 "covers": spec["covers"],
                 "ac_refs": ac_refs,
+                "example_refs": spec.get("example_refs", []),
                 "gherkin": spec["gherkin"],
             }
         )
+
+    # Deterministic every-example-covered check against the Three Amigos cards.
+    cited = {ref for s in scenarios for ref in s["example_refs"]}
+    uncovered_examples = [cid for cid in all_card_ids if cid not in cited]
 
     unit = sum(1 for s in scenarios if s["level"] == "unit")
     api = sum(1 for s in scenarios if s["level"] == "api")
@@ -637,7 +762,20 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
                 else " (derived from acceptance criteria — no upstream example map)."
             )
         ),
-        "findings": [],
+        "findings": (
+            [
+                {
+                    "title": f"{len(uncovered_examples)} example card(s) with no "
+                    "realising scenario",
+                    "detail": ", ".join(uncovered_examples)
+                    + " — reconciliation is exercised by the Financial Data Integrity "
+                    "checks rather than a BDD scenario; confirm that is intentional.",
+                    "severity": "LOW",
+                }
+            ]
+            if uncovered_examples
+            else []
+        ),
         "release_blocking": False,
         "feature": {
             "name": f"{story.jira_key} — Household net-worth rollup",
@@ -656,6 +794,9 @@ def bdd_generator(story: Story, artifacts=None, upstream=None) -> dict:
             "rules_covered": rules_total,
             "ac_covered": len(_ac(story)),
             "uncovered": [],
+            "examples_total": len(all_card_ids),
+            "examples_covered": len(all_card_ids) - len(uncovered_examples),
+            "uncovered_examples": uncovered_examples,
             "breakdown": breakdown,
         },
         "pyramid": {

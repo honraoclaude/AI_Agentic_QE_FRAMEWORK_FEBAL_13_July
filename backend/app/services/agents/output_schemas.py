@@ -184,13 +184,68 @@ class PersonaPrompts(BaseModel):
     quality_engineer: list[str]
 
 
+class ExampleCard(BaseModel):
+    """One green card: a concrete, machine-anchorable example for a rule."""
+
+    id: str = Field(
+        default="",
+        description="Stable anchor, EX-<rule>.<n> (e.g. EX-1.2) — BDD scenarios cite it",
+    )
+    text: str = Field(description="The concrete example/case")
+    kind: Literal["HAPPY", "NEGATIVE", "BOUNDARY"] = Field(
+        default="HAPPY", description="Case path this example exercises"
+    )
+    fca: bool = Field(
+        default=False,
+        description="Regulatory-evidence example — must map to an @fca scenario (Gate 3)",
+    )
+
+
 class ExampleRule(BaseModel):
     """An Example Mapping pairing: one testable business rule (blue card) with
     the concrete examples that illustrate it (green cards)."""
 
     rule: str = Field(description="A single testable business rule")
-    examples: list[str] = Field(
+    ac_refs: list[str] = Field(
+        default_factory=list,
+        description="Evidence anchor: acceptance-criterion ids (e.g. AC-1) this rule derives from",
+    )
+    examples: list[ExampleCard] = Field(
         description="Concrete examples/cases (happy, negative, boundary) for this rule"
+    )
+
+
+class DodItem(BaseModel):
+    """One Definition-of-Done item, mapped to what verifies it — so the DoD is a
+    checkable contract, not prose."""
+
+    item: str
+    verified_by: str = Field(
+        default="MANUAL",
+        description="Agent key that evidences this item (e.g. apex_coverage, "
+        "financial_data_integrity) or MANUAL when only a human can verify it",
+    )
+    fca_evidence: bool = Field(
+        default=False, description="Item is FCA compliance evidence for Gate 3"
+    )
+
+
+class Agreement(BaseModel):
+    """A decision the three amigos explicitly agreed — a mini decision-record
+    with audit value in a regulated context."""
+
+    decision: str
+    rationale: str = Field(default="", description="Why this was agreed — the audit 'why'")
+
+
+class OpenQuestion(BaseModel):
+    question: str
+    owner_persona: Literal["PRODUCT_OWNER", "DEVELOPER", "QUALITY_ENGINEER"] = Field(
+        default="PRODUCT_OWNER", description="Who owes the answer"
+    )
+    blocking: bool = Field(
+        default=False,
+        description="True when BDD drafting should not proceed until answered",
     )
 
 
@@ -207,17 +262,18 @@ class ThreeAmigosOutput(AgentOutputBase):
         description="Business rules each with concrete examples; the raw material "
         "the BDD Scenario Generator turns into Gherkin"
     )
-    definition_of_done: list[str] = Field(
-        description="Story-tailored Definition of Done, including explicit FCA "
-        "compliance-evidence items to capture"
+    definition_of_done: list[DodItem] = Field(
+        description="Story-tailored Definition of Done, each item mapped to the "
+        "agent (or MANUAL) that verifies it, with FCA-evidence items flagged"
     )
-    agreements: list[str] = Field(
+    agreements: list[Agreement] = Field(
         description="Decisions the three amigos explicitly agreed — auditable "
-        "resolutions, distinct from open questions"
+        "decision-records (with rationale), distinct from open questions"
     )
     risks: list[Risk]
-    open_questions: list[str] = Field(
-        description="Unresolved questions blocking full shared understanding"
+    open_questions: list[OpenQuestion] = Field(
+        description="Unresolved questions, each with an owning persona and a "
+        "blocking flag when BDD drafting must wait for the answer"
     )
     persona_prompts: PersonaPrompts
     refinement_summary: str
@@ -273,6 +329,11 @@ class BddScenario(BaseModel):
         default_factory=list,
         description="Evidence anchor: acceptance-criterion ids (e.g. AC-1) this scenario validates",
     )
+    example_refs: list[str] = Field(
+        default_factory=list,
+        description="Example-card ids (e.g. EX-1.2) from Three Amigos this scenario realises "
+        "— enables a deterministic every-example-covered check",
+    )
     gherkin: str = Field(description="Complete well-formed Gherkin scenario")
 
 
@@ -292,6 +353,16 @@ class BddCoverage(BaseModel):
     ac_covered: int
     uncovered: list[str] = Field(
         description="Rules/AC with no scenario yet — Gate 1 gaps"
+    )
+    examples_total: int = Field(
+        default=0, description="Example cards received from Three Amigos"
+    )
+    examples_covered: int = Field(
+        default=0, description="Example cards cited by at least one scenario (example_refs)"
+    )
+    uncovered_examples: list[str] = Field(
+        default_factory=list,
+        description="Example-card ids with no realising scenario — Gate 1 gaps",
     )
     breakdown: TestBreakdown = Field(
         description="Counts of scenarios by category, type and automation status"

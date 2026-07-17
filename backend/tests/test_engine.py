@@ -96,14 +96,16 @@ async def test_three_amigos_v2_output_shape(session, adapter):
     story = await _seed(session, adapter)  # WLTH-101 is FCA HIGH
     body = GENERATORS["three_amigos"](story)
 
-    # Validates against the v2 schema (rules+examples, DoD, agreements, risks).
+    # Validates against the v3 schema (structured cards, DoD, agreements, risks).
     parsed = ThreeAmigosOutput.model_validate(body)
     assert len(parsed.example_map) >= 2
     assert all(r.examples for r in parsed.example_map)
     assert parsed.agreements and parsed.open_questions
     assert any(r.category == "COMPLIANCE" for r in parsed.risks)
-    # HIGH-impact story -> DoD carries explicit FCA evidence items.
-    assert any("[FCA]" in item or "audit record" in item.lower()
+    # HIGH-impact story -> DoD carries explicit FCA evidence items, mapped to
+    # the verifying agents (checkable contract, not prose).
+    assert any(item.fca_evidence for item in parsed.definition_of_done)
+    assert any(item.verified_by not in ("", "MANUAL")
                for item in parsed.definition_of_done)
     # No Gherkin here — that's the BDD agent's job.
     assert "scenarios" not in body

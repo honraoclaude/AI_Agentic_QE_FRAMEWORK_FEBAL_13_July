@@ -111,6 +111,37 @@ store. Scoped **advisory-only** (agreed):
 - 🟡 **Approval SLAs + escalation (S)** and **Slack/Teams notifications (S)** wired
   to the existing work queue.
 
+### 📌 PARKED — Stakeholder reporting (report-per-decision, not one dashboard)
+*Discussed, not yet agreed. Principle: a report serves one decision; five reports
+for five personas over one shared vocabulary (same severity scale, health band,
+confidence, trust scores) so numbers never contradict across views.*
+
+| Persona | Decision | Grain | Cadence | Hero metric | Backed by |
+|---|---|---|---|---|---|
+| **Senior mgmt** | Are we exposed? Worth it? | Portfolio | Weekly/monthly digest | Regulatory exposure + release confidence + value realized | 🆕 rollup over Referee health + audit |
+| **Product Owner** | Is *my* story ready to ship? | Story | Per-story/sprint | Readiness + open blockers + sign-off state | ✅ Referee health, gates |
+| **Delivery/PM** | Where is flow stuck? Who owes what? | Flow (across stories) | Daily/standup | Pipeline aging + HITL queue depth + SLA breaches | 🆕 flow view over work queue |
+| **Dev / BA** | What do I fix, exactly? | Run/finding | Real-time | Actionable finding list w/ location + remediation | ✅ code review, static, AC, deployability |
+| **QA** | Is quality proven? What's the gap? | Story (testing) | Per-story | Coverage + failure analysis + FCA-scenario/traceability | ✅ test-execution, coverage, regression, financial-integrity |
+
+- **Reuse-heavy** (PO, Dev, QA) — re-cuts/filters of data the agents + Referee
+  already produce; framing, not new intelligence.
+- **Net-new** (Leadership, PM) — both need a **cross-story / portfolio rollup**
+  layer that doesn't exist today (everything is per-story `StoryHealth`). That
+  rollup is the one real new building block and powers *both* — build it as the
+  foundation. Exec ROI line (hours saved, escaped defects) depends on the Value
+  Realization / Escape Loop instrumentation; ship exec **posture-only** first.
+
+**Open decisions to agree before building:**
+1. Delivery model — in-app role-aware views only, or *pushed* digests (PDF/email/
+   Slack) for exec/PM who won't log in? (rec: in-app for all five + exportable
+   one-pager for exec, reusing the evidence-pack print-to-PDF pattern.)
+2. Build the portfolio rollup (unlocks exec + PM), or stay story-only for now?
+   (rec: build it.)
+3. First cut: all five, or prove the pattern on one — Leadership (forces the
+   rollup) or PM flow (highest operational pain)? (rec: one first.)
+4. Confirm the five hero metrics — every report is built backward from its number.
+
 ## 5. Ecosystem depth
 
 - 🟢 **Copado CI/CD integration** — see [COPADO-INTEGRATION.md](COPADO-INTEGRATION.md).
