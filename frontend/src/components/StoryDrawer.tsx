@@ -71,6 +71,9 @@ function HealthCard({ health }: { health: StoryHealth }) {
           <span className="text-[10px] text-ink-faint">
             {health.agents_evaluated} agents · assurance {health.assurance ?? "—"} ·{" "}
             {health.counts.pass}✓ {health.counts.warn}▲ {health.counts.fail}✗
+            {health.worst_finding_severity && (
+              <> · worst finding {health.worst_finding_severity}</>
+            )}
           </span>
         </div>
         <div className="ml-auto flex gap-1">

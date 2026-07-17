@@ -10,7 +10,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Severity = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+# One calibrated severity scale used across every agent (see docs/SEVERITY.md).
+# Ascending order; BLOCKER is the top (stops the release). Defect-style MAJOR/
+# MINOR are folded into HIGH/LOW so all agents are comparable.
+Severity = Literal["BLOCKER", "CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+SEVERITY_ORDER = ["LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER"]
+_SEVERITY_RANK = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4,
+                  "BLOCKER": 5, "MAJOR": 3, "MINOR": 1}  # MAJOR/MINOR = legacy aliases
+
+
+def severity_rank(value: str | None) -> int:
+    """A single numeric ordering for any severity token — lets the Referee and
+    any aggregation compare severities across agents regardless of wording."""
+    return _SEVERITY_RANK.get((value or "NONE").upper(), 0)
 
 
 class Finding(BaseModel):
@@ -643,7 +656,8 @@ class DeployabilityValidationOutput(AgentOutputBase):
 # --- Phase 3: Testing ----------------------------------------------------
 
 
-TestSeverity = Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+# Defect severity now uses the one canonical scale (kept as an alias for clarity).
+TestSeverity = Severity
 
 
 class RunSummary(BaseModel):
@@ -722,7 +736,7 @@ class IntegrityCheck(BaseModel):
     within_tolerance: bool
     passed: bool
     materiality: str = Field(description="The financial (£) impact of any discrepancy")
-    severity: Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+    severity: Severity
     regulatory_basis: str | None = Field(
         default=None, description="The FCA obligation this evidences (COBS/Consumer Duty/CASS)"
     )
@@ -809,12 +823,12 @@ class DefectCluster(BaseModel):
     classification: Literal["PRODUCT_DEFECT", "TEST_DEFECT", "ENVIRONMENT", "DATA", "FLAKY"]
     suspected_root_cause: str
     suspected_component: str
-    severity: Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+    severity: Severity
 
 
 class TriagedDefect(BaseModel):
     title: str
-    severity: Literal["BLOCKER", "CRITICAL", "MAJOR", "MINOR"]
+    severity: Severity
     component: str
     from_cluster: str
     recommended_action: str

@@ -1584,9 +1584,9 @@ def test_execution_analyst(story: Story, artifacts=None, upstream=None) -> dict:
         elif classification == "PRODUCT_DEFECT":
             severity = "CRITICAL"
         elif classification in ("ENVIRONMENT", "DATA"):
-            severity = "MAJOR"
+            severity = "HIGH"
         else:
-            severity = "MINOR"
+            severity = "LOW"
         priority = (
             matched.get("priority")
             if matched and matched.get("priority")
@@ -1737,14 +1737,14 @@ def financial_data_integrity(story: Story, artifacts=None, upstream=None) -> dic
                     "name": "Household rollup total", "category": "ROLLUP",
                     "expected": "875000.00", "actual": "875000.00", "variance": "0.00",
                     "tolerance": "0.00", "within_tolerance": True, "passed": True,
-                    "materiality": "none", "severity": "MINOR",
+                    "materiality": "none", "severity": "LOW",
                     "regulatory_basis": _FIN_REG["ROLLUP"], "source": "illustrative",
                 },
                 {
                     "name": "GBP rounding half-up 2dp", "category": "ROUNDING",
                     "expected": "1250.00", "actual": "1250.00", "variance": "0.00",
                     "tolerance": "0.01", "within_tolerance": True, "passed": True,
-                    "materiality": "none", "severity": "MINOR",
+                    "materiality": "none", "severity": "LOW",
                     "regulatory_basis": _FIN_REG["ROUNDING"], "source": "illustrative",
                 },
             ],
@@ -1788,7 +1788,7 @@ def financial_data_integrity(story: Story, artifacts=None, upstream=None) -> dic
                 "within_tolerance": within,
                 "passed": passed,
                 "materiality": materiality,
-                "severity": "BLOCKER" if not passed else "MINOR",
+                "severity": "BLOCKER" if not passed else "LOW",
                 "regulatory_basis": _FIN_REG[cat],
                 "source": "Finance reconciliation extract",
             }
@@ -2020,7 +2020,7 @@ def defect_triage(story: Story, artifacts=None, upstream=None) -> dict:
                 "classification": "TEST_DEFECT",
                 "suspected_root_cause": "Stale selector after a component rename.",
                 "suspected_component": "householdSummary LWC test",
-                "severity": "MINOR",
+                "severity": "LOW",
             })
     flaky_count = sum(1 for c in clusters if c["classification"] == "FLAKY")
     has_product = any(c["classification"] == "PRODUCT_DEFECT" for c in clusters)
@@ -2355,13 +2355,15 @@ def deployment_risk(story: Story, artifacts=None, upstream=None) -> dict:
 
     concerns = [f for f in factors if f["status"] == "CONCERN"]
     blockers = [f for f in factors if f["status"] == "BLOCKER"]
-    score = min(100, 20 + 20 * len(concerns) + 50 * len(blockers))
+    score = min(100, 20 + 15 * len(concerns) + 40 * len(blockers))
+    # risk_level derives from the score band, so score and level never disagree.
+    level = "HIGH" if score >= 60 else "MEDIUM" if score >= 35 else "LOW"
     if blockers:
-        rec, level, verdict = "NO_GO", "HIGH", "FAIL"
+        rec, verdict = "NO_GO", "FAIL"
     elif concerns:
-        rec, level, verdict = "CONDITIONAL_GO", "MEDIUM", "WARN"
+        rec, verdict = "CONDITIONAL_GO", "WARN"
     else:
-        rec, level, verdict = "GO", "LOW", "PASS"
+        rec, verdict = "GO", "PASS"
     conditions = (
         ["Deploy in the agreed window with Compliance on the bridge",
          "Run the post-deploy financial spot-check before go-live announcement"]

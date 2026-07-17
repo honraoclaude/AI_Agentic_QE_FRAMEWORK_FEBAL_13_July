@@ -33,6 +33,7 @@ const SEV_COLORS: Record<string, string> = {
   MEDIUM: "text-warn",
   HIGH: "text-bad",
   CRITICAL: "text-bad font-bold",
+  BLOCKER: "text-bad font-bold underline",
 };
 
 function ValueBlock({ value }: { value: unknown }): ReactNode {
@@ -288,6 +289,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       )
     ) {
       const sevCls: Record<string, string> = {
+        BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
         CRITICAL: "border-bad/60 bg-bad/15 text-bad",
         HIGH: "border-bad/50 bg-bad/10 text-bad",
         MEDIUM: "border-warn/50 bg-warn/10 text-warn",
@@ -721,6 +723,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       )
     ) {
       const sevCls: Record<string, string> = {
+        BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
         CRITICAL: "border-bad/50 bg-bad/10 text-bad",
         HIGH: "border-bad/50 bg-bad/10 text-bad",
         MEDIUM: "border-warn/50 bg-warn/10 text-warn",
@@ -808,6 +811,7 @@ function ValueBlock({ value }: { value: unknown }): ReactNode {
       )
     ) {
       const sevCls: Record<string, string> = {
+        BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
         CRITICAL: "border-bad/50 bg-bad/10 text-bad",
         HIGH: "border-bad/50 bg-bad/10 text-bad",
         MEDIUM: "border-warn/50 bg-warn/10 text-warn",

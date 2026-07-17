@@ -239,6 +239,7 @@ export interface StoryHealth {
   phase_breakdown: { phase: string; score: number }[];
   blockers: { agent: string; phase: string; summary: string }[];
   least_confident: { agent: string; verdict: string; phase: string }[];
+  worst_finding_severity: string | null;
   agents_evaluated: number;
   inconsistencies: Inconsistency[];
   inconsistency_count: number;

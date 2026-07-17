@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import AgentRun, RunStatus
 from ..models.enums import PHASE_ORDER
+from .agents.output_schemas import severity_rank
 from .agents.registry import get_agent
 
 VERDICT_SCORE = {"PASS": 100, "WARN": 65, "FAIL": 25}
@@ -119,6 +120,15 @@ def compute_health(latest: dict[str, AgentRun]) -> dict:
     assurance_w = conf_w_sum / len(runs)
     assurance = "HIGH" if assurance_w >= 0.95 else "MEDIUM" if assurance_w >= 0.75 else "LOW"
 
+    # The single worst finding across all agents — enabled by the one calibrated
+    # severity scale (severity_rank compares across every agent's vocabulary).
+    worst_sev, worst_rank = None, 0
+    for r in runs:
+        for f in _out(r).get("findings") or []:
+            rk = severity_rank(f.get("severity"))
+            if rk > worst_rank:
+                worst_rank, worst_sev = rk, f.get("severity")
+
     phase_breakdown = [
         {"phase": p, "score": round(sum(by_phase[p]) / len(by_phase[p]))}
         for p in sorted(by_phase, key=lambda x: PHASE_ORDER.index(_phase_enum(x)))
@@ -127,6 +137,7 @@ def compute_health(latest: dict[str, AgentRun]) -> dict:
         "score": score, "band": band, "assurance": assurance,
         "counts": counts, "phase_breakdown": phase_breakdown,
         "blockers": blockers, "least_confident": least_confident,
+        "worst_finding_severity": worst_sev,
         "agents_evaluated": len(runs),
     }
 
