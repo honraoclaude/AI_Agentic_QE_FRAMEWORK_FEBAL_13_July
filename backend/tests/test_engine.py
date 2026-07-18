@@ -72,6 +72,20 @@ async def test_no_api_key_uses_rich_demo_fixture(session, adapter):
     assert result.input_json["story"]["jira_key"] == story.jira_key
 
 
+async def test_run_records_the_prompt_version_that_actually_executed(session, adapter):
+    """A run proposed before a prompt upgrade must not claim the old version
+    after executing with the new one — the audit record reflects reality."""
+    story = await _seed(session, adapter)
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    run.prompt_version = "v0-stale"  # simulate: proposed before a registry bump
+    await session.flush()
+
+    result = await workflow.approve_and_run(session, run.id, approver="Test Lead")
+    current = AGENTS["story_quality"].prompt_version
+    assert result.prompt_version == current  # re-stamped at execution
+    assert result.input_json["prompt_version"] == current  # row and input agree
+
+
 async def test_demo_fixtures_cover_every_agent(session, adapter):
     from app.services.agents.demo_outputs import GENERATORS
     from app.services.agents.registry import AGENTS

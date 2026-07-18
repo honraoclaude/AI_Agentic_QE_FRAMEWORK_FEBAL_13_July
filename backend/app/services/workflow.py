@@ -242,6 +242,10 @@ async def approve_and_run(
 
     run.status = RunStatus.COMPLETED
     run.completed_at = utcnow()
+    # Re-stamp with the version that ACTUALLY executed: the row was stamped at
+    # propose time, but the engine loads the current registry prompt — if the
+    # prompt was upgraded in between, the audit record must reflect reality.
+    run.prompt_version = agent.prompt_version
     run.output_json = result["output"]
     run.input_json = result["input"]
     run.output_hash = result["output_hash"]
