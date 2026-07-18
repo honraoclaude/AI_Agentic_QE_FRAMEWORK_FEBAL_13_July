@@ -92,6 +92,28 @@ async def test_bdd_unchained_has_no_example_refs(session, adapter):
     assert not parsed.coverage.uncovered_examples
 
 
+async def test_persona_prompts_confirm_pipeline_answers_and_fit_cloud(session, adapter):
+    """Prompts never re-ask what the pipeline answered (they ask to CONFIRM),
+    and are appropriate to the story's cloud (rollup config is FSC-only)."""
+    from app.models.enums import Cloud
+
+    story = await _seed(session, adapter)
+    pp = ThreeAmigosOutput.model_validate(
+        GENERATORS["three_amigos"](story)
+    ).persona_prompts
+    # Pipeline-answered topics are confirmation prompts, not open questions.
+    assert any("Confirm" in p and "Consumer Duty" in p for p in pp.product_owner)
+    assert any("Confirm" in p and "fca-flagged" in p for p in pp.quality_engineer)
+
+    story.cloud = Cloud.SALES
+    pp_sales = ThreeAmigosOutput.model_validate(
+        GENERATORS["three_amigos"](story)
+    ).persona_prompts
+    # No FSC rollup-configuration question on a Sales Cloud story.
+    assert not any("rollup configuration" in p for p in pp_sales.developer)
+    assert any("opportunity/pipeline" in p for p in pp_sales.developer)
+
+
 class _FakeRun:
     def __init__(self, output):
         from app.models import Phase

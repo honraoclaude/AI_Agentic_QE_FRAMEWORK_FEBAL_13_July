@@ -92,7 +92,7 @@ AGENTS: dict[str, AgentDefinition] = {
                 "owned open questions (blocking-aware). Feeds the BDD Scenario "
                 "Generator."
             ),
-            prompt_version="v3",
+            prompt_version="v4",
         ),
         AgentDefinition(
             key="bdd_generator",

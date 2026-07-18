@@ -528,19 +528,31 @@ def three_amigos(story: Story, artifacts=None) -> dict:
             },
         ],
         "persona_prompts": {
+            # Principle: never re-ask what the pipeline already answered —
+            # ask the humans to CONFIRM agent answers, or ask what no agent knows.
             "product_owner": [
                 "What is the business impact if the figure is a penny out?",
-                "Which Consumer Duty outcome does this support, and how is it evidenced?",
+                "Confirm the Consumer Duty outcomes the Outcome Mapper assessed "
+                "— is any outcome or foreseeable harm missing?",
                 "Is this in scope for all client segments or advised clients only?",
             ],
             "developer": [
-                f"Does this touch {cloud} rollup configuration or sharing rules?",
+                (
+                    "Does this touch FSC rollup configuration or sharing rules?"
+                    if cloud == "FSC"
+                    else "Does this change opportunity/pipeline configuration or "
+                    "sharing rules?"
+                    if cloud == "SALES"
+                    else "Does this touch journey/audience configuration or "
+                    "consent preferences?"
+                ),
                 "What recalculation trigger and bulk (200-record) path is expected?",
                 "Any Copado deployment order dependency on other stories this sprint?",
             ],
             "quality_engineer": [
                 "What household test data do we need seeded in the QA sandbox?",
-                "Which examples are regulatory-evidence scenarios (fca flag)?",
+                "Confirm the fca-flagged example cards are the right and complete "
+                "set for Gate 3 evidence.",
                 "Can this be verified at unit/API level to keep UI tests minimal?",
             ],
         },
