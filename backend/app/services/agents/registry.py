@@ -87,12 +87,13 @@ AGENTS: dict[str, AgentDefinition] = {
             pact=("Collaborative",),
             purpose=(
                 "Builds shared understanding via Example Mapping (AC-anchored "
-                "rules + typed example cards), a Definition of Done mapped to "
-                "the verifying agents, decision-record agreements, risks, and "
-                "owned open questions (blocking-aware). Feeds the BDD Scenario "
-                "Generator."
+                "rules + typed example cards) over the augmented AC set — "
+                "consuming Story Quality's AC gaps and the Compliance AC "
+                "Advisor's proposed criteria — with a verifiable DoD, "
+                "decision-record agreements, risks, and owned open questions "
+                "(blocking-aware). Feeds the BDD Scenario Generator."
             ),
-            prompt_version="v4",
+            prompt_version="v5",
         ),
         AgentDefinition(
             key="bdd_generator",

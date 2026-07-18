@@ -345,13 +345,46 @@ def compliance_ac_advisor(story: Story, artifacts=None, upstream=None) -> dict:
     }
 
 
-def three_amigos(story: Story, artifacts=None) -> dict:
+def three_amigos(story: Story, artifacts=None, upstream=None) -> dict:
     cloud = _cloud(story)
     high = story.fca_impact is None or story.fca_impact.value in ("MEDIUM", "HIGH")
     acs = _ac_items(story)
 
     def refs(text: str) -> list[str]:
         return [_ac_ref_for(text, acs)] if acs else []
+
+    # Chained refinement: build over the AUGMENTED AC set.
+    sq = _upstream_output(upstream, "story_quality")
+    advisor = _upstream_output(upstream, "compliance_ac_advisor")
+    sq_gaps = (sq or {}).get("acceptance_criteria_gaps", [])
+    advisor_must = [
+        c for c in (advisor or {}).get("suggested_criteria", [])
+        if c.get("priority") == "MUST"
+    ]
+
+    # Story Quality's AC gaps become session material — questions to pin down.
+    extra_questions = [
+        {
+            "question": f"Story Quality flagged an AC gap — agree the missing "
+            f"criterion: {str(g)[:140]}",
+            "owner_persona": "PRODUCT_OWNER",
+            "blocking": False,
+        }
+        for g in sq_gaps[:2]
+    ]
+    # The Advisor's proposed compliance ACs enter the session scope explicitly.
+    extra_agreements = (
+        [
+            {
+                "decision": f"Adopted the Compliance AC Advisor's {len(advisor_must)} "
+                "MUST criteria into scope (to be formalised as fca-flagged scenarios)",
+                "rationale": "Compliance enters the ACs before BDD formalises them — "
+                "the shift-left chain this session exists to land.",
+            }
+        ]
+        if advisor_must
+        else []
+    )
 
     dod = [
         {
@@ -410,6 +443,12 @@ def three_amigos(story: Story, artifacts=None) -> dict:
             f"Shared understanding captured for {story.jira_key} via Example "
             "Mapping. Three decisions agreed; one BLOCKING open question "
             "(reconciliation tolerance) must be answered before BDD drafting."
+            + (
+                f" Session scope includes the Advisor's {len(advisor_must)} MUST "
+                "compliance criteria and Story Quality's flagged AC gaps."
+                if advisor_must or sq_gaps
+                else ""
+            )
         ),
         "findings": [],
         "release_blocking": False,
@@ -495,7 +534,8 @@ def three_amigos(story: Story, artifacts=None) -> dict:
                 "rationale": "Machine-readable flag makes Gate 3 evidence selection "
                 "deterministic instead of a string-tag convention.",
             },
-        ],
+        ]
+        + extra_agreements,
         "risks": [
             {
                 "risk": "Rollup accumulates into Double, causing rounding drift on large households",
@@ -526,7 +566,8 @@ def three_amigos(story: Story, artifacts=None) -> dict:
                 "owner_persona": "PRODUCT_OWNER",
                 "blocking": True,
             },
-        ],
+        ]
+        + extra_questions,
         "persona_prompts": {
             # Principle: never re-ask what the pipeline already answered —
             # ask the humans to CONFIRM agent answers, or ask what no agent knows.

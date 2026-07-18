@@ -92,6 +92,42 @@ async def test_bdd_unchained_has_no_example_refs(session, adapter):
     assert not parsed.coverage.uncovered_examples
 
 
+async def test_three_amigos_consumes_upstream_refinement_chain(session, adapter):
+    """The designed-but-previously-unwired seam: Story Quality's AC gaps become
+    open questions; the Advisor's MUST criteria are adopted as an agreement."""
+    from app.models.enums import AGENT_UPSTREAM_INPUTS
+
+    assert AGENT_UPSTREAM_INPUTS["three_amigos"] == [
+        "story_quality",
+        "compliance_ac_advisor",
+    ]
+
+    story = await _seed(session, adapter)
+    sq = GENERATORS["story_quality"](story)
+    advisor = build("compliance_ac_advisor", story, None, artifacts=[], upstream=[])
+    upstream = [
+        {"agent_key": "story_quality", "agent_name": "Story Quality", "output": sq},
+        {"agent_key": "compliance_ac_advisor", "agent_name": "Advisor", "output": advisor},
+    ]
+    parsed = ThreeAmigosOutput.model_validate(
+        build("three_amigos", story, None, artifacts=[], upstream=upstream)
+    )
+    # AC gaps -> open questions for the session.
+    gap_qs = [q for q in parsed.open_questions if "Story Quality flagged" in q.question]
+    assert len(gap_qs) == min(2, len(sq["acceptance_criteria_gaps"]))
+    # Advisor MUST criteria -> an adoption agreement, with the audit why.
+    adoption = [a for a in parsed.agreements if "Compliance AC Advisor" in a.decision]
+    assert len(adoption) == 1 and adoption[0].rationale
+    assert "Advisor" in parsed.summary
+
+    # Unchained: none of that appears (story-only mode still works).
+    unchained = ThreeAmigosOutput.model_validate(
+        build("three_amigos", story, None, artifacts=[], upstream=[])
+    )
+    assert not [q for q in unchained.open_questions if "Story Quality" in q.question]
+    assert not [a for a in unchained.agreements if "Advisor" in a.decision]
+
+
 async def test_persona_prompts_confirm_pipeline_answers_and_fit_cloud(session, adapter):
     """Prompts never re-ask what the pipeline answered (they ask to CONFIRM),
     and are appropriate to the story's cloud (rollup config is FSC-only)."""

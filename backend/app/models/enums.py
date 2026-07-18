@@ -96,6 +96,10 @@ AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
     "fca_regulatory_impact": ["story_quality"],
     "consumer_duty_mapper": ["fca_regulatory_impact"],
     "compliance_ac_advisor": ["fca_regulatory_impact", "consumer_duty_mapper"],
+    # Three Amigos builds the example map over the AUGMENTED AC set: Story
+    # Quality's AC gaps become open questions/rules to pin down; the Advisor's
+    # proposed compliance ACs become fca-flagged example cards.
+    "three_amigos": ["story_quality", "compliance_ac_advisor"],
     "bdd_generator": ["story_quality", "three_amigos", "compliance_ac_advisor"],
     "ac_compliance": ["bdd_generator"],
     "apex_coverage": ["bdd_generator"],
