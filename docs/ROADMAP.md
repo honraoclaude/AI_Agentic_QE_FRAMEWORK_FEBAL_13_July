@@ -233,7 +233,21 @@ Nothing built yet.*
 
 **Batch 1 — CI + cheap correctness (highest signal per hour)**
 - 🟢 **GitHub Actions CI (S)** — pytest + `tsc`/`vite build` on every push; green
-  badge on the README.
+  badge on the README. *Re-affirmed as the #1 priority in the 2026-07-19
+  architect/QE assessment: the framework preaches CI gates but has none on
+  itself — narrative-consistency gap, half a day to close.* Design agreed:
+  `.github/workflows/ci.yml`, two parallel jobs (backend: setup-python 3.13 →
+  pip install → `pytest -q`; frontend: setup-node 20 → `npm ci` →
+  `npm run build`), on `[push, pull_request]`, free on the public repo.
+  Later riders (each trivial once CI exists): the **eval harness in CI**
+  (prompt bumps gated by golden-dataset evals), `ruff`, `tsc --noEmit`.
+
+*Other 2026-07-19 assessment priorities parked here (in recommended order
+after CI): (2) **README honesty pass** — state the demo-fixture vs live-model
+boundary explicitly; (3) **auth seam** (= Batch 4 below); (4) **eval harness
+growth** — 3-5 golden cases × top-5 agents + one live-model smoke eval script;
+(5) **Accessibility/WCAG agent** for client portals (Consumer Duty cares about
+accessible client communications — the one domain gap in Testing coverage).*
 - 🟢 **Enforce signer roles at gate sign-off (S)** — reject a sign-off whose role
   isn't a permitted signer for the phase (`workflow.signoff_gate` + existing
   `GATE_SIGNERS`). Makes the HITL model actually enforced.
