@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api } from "../api";
-import type { AgentDef, PushItem, Run } from "../types";
+import type { AgentDef, PushItem, ReplayReport, Run } from "../types";
 import {
   Badge,
   Button,
@@ -1520,6 +1520,7 @@ export function RunCard({
   const [text, setText] = useState("");
   const [pushPreview, setPushPreview] = useState<PushItem | null>(null);
   const [view, setView] = useState<"output" | "input">("output");
+  const [replayReport, setReplayReport] = useState<ReplayReport | null>(null);
   const [expanded, setExpanded] = useState(
     run.status === "COMPLETED" || run.status === "FAILED",
   );
@@ -1543,6 +1544,12 @@ export function RunCard({
     mutationFn: (kind: "agent_summary" | "bdd_scenarios") =>
       api.draftPush(kind, run.id, actor),
     onSuccess: (item) => setPushPreview(item),
+    onError: (e: Error) => toast("error", e.message),
+  });
+
+  const replayMutation = useMutation({
+    mutationFn: () => api.replayRun(run.id),
+    onSuccess: (report) => setReplayReport(report),
     onError: (e: Error) => toast("error", e.message),
   });
 
@@ -1684,6 +1691,17 @@ export function RunCard({
             {(run.status === "REJECTED" || run.status === "FAILED") && (
               <Button onClick={guard(() => setModal("rerun"))}>↻ Re-run with guidance…</Button>
             )}
+            {(run.status === "COMPLETED" ||
+              run.status === "ACCEPTED" ||
+              run.status === "REJECTED") &&
+              run.output_hash && (
+                <Button
+                  busy={replayMutation.isPending}
+                  onClick={() => replayMutation.mutate()}
+                >
+                  ⟲ Verify reproducibility
+                </Button>
+              )}
             {run.status === "ACCEPTED" && (
               <>
                 <Button
@@ -1703,6 +1721,43 @@ export function RunCard({
               </>
             )}
           </div>
+
+          {replayReport && (
+            <div
+              className={`mt-2 rounded border px-2.5 py-1.5 text-[11px] ${
+                replayReport.status === "REPRODUCED"
+                  ? "border-ok/50 bg-ok/10 text-ok"
+                  : replayReport.status === "INPUT_DRIFT"
+                    ? "border-warn/50 bg-warn/10 text-warn"
+                    : "border-bad/50 bg-bad/10 text-bad"
+              }`}
+            >
+              {replayReport.status === "REPRODUCED" && (
+                <>
+                  ✓ REPRODUCED — re-executed and matched the recorded hashes
+                  byte-for-byte (out#
+                  {replayReport.replay_output_hash.slice(0, 10)}). The audit
+                  guarantee, demonstrated.
+                </>
+              )}
+              {replayReport.status === "INPUT_DRIFT" && (
+                <>
+                  ⚠ INPUT DRIFT — inputs have changed since this run:{" "}
+                  {replayReport.drift.join(", ")}. The recorded decision still
+                  stands; a fresh run would see different inputs.
+                </>
+              )}
+              {replayReport.status === "OUTPUT_DIVERGED" && (
+                <>
+                  ⛔ OUTPUT DIVERGED — same inputs, different output (
+                  {replayReport.deterministic
+                    ? "stored record does not match the deterministic replay — investigate tampering or a generator change"
+                    : "model nondeterminism on the live path — comparison is advisory"}
+                  ). Verdict stable: {String(replayReport.verdict_stable)}.
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

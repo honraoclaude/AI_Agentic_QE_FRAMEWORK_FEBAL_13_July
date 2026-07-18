@@ -38,6 +38,21 @@ Legend: 🟢 high value · 🟡 medium · ⚪ nice-to-have · (S/M/L) = effort.
   override rates and reject reasons. `GET /insights/agents` + the Agent Insights
   tab. Tells us *which agents humans push back on*.
 
+- ✅ **SHIPPED — Replay Verifier** — `POST /runs/{id}/replay` + "Verify
+  reproducibility" button: re-executes a historical run and compares hashes —
+  REPRODUCED / INPUT_DRIFT (names what moved) / OUTPUT_DIVERGED (tamper-evidence).
+  Audited as RUN_REPLAYED.
+- ✅ **SHIPPED — Adversarial Challenger** — deterministic red-team pass pinned to
+  every gate sign-off (`GET /stories/{id}/challenges?phase=`): caveats, severe
+  findings under accepting verdicts, contradictions, blocking questions,
+  uncovered evidence — "the case against", advisory only. (LLM augmentation
+  layer deferred, clearly-tagged, when wanted.)
+- ✅ **SHIPPED — Eval harness v1** — `backend/evals/golden/` +
+  `services/evals.py`: expert-labelled golden cases graded deterministically
+  (equals/approx/min_len/contains), schema-validated, run in the test suite on
+  every push. Financial Data Integrity seeded (4 cases). Real-model scoring
+  per prompt version = the remaining step.
+
 ### 📌 PARKED — Agent eval harness + golden dataset (M–L)
 *The measured-accuracy complement to the (shipped) feedback loop. Feedback tells
 us whether humans agree; an eval harness tells us whether an agent is actually
@@ -71,7 +86,13 @@ FCA guardrail on "learning".*
 (`/insights/agents` — per-agent trust, accept/reject/rerun). Those cover *quality*
 health. The two below are the gaps.
 
-**1) Operational Agent Health monitor (M) — build first.**
+**1) ✅ SHIPPED — Operational Agent Health monitor.** `services/agent_health.py`
+→ `GET /insights/agent-health` → "Operational Health" section on Agent Insights:
+failure rates, latency, token spend, per-prompt-version reliability, and
+threshold alerts (FAILURE_RATE, VERSION_REGRESSION). Deterministic — no model
+calls. *(Original sketch below, kept for context.)*
+
+**Original sketch — Operational Agent Health monitor (M).**
 The SRE/observability layer the quality analytics don't give: failure/error rates
 (`RUN_FAILED`), latency, **token cost/budget**, per-model and **per-prompt-version
 reliability** (did v3 regress?), confidence trend, and **anomaly alerts**

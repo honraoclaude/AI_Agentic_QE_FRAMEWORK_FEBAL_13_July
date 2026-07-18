@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..models import AgentRun, AuditEvent, Gate, Story
+from ..models import AgentRun, AuditEvent, Gate, Phase, Story
 from ..schemas import (
     AuditEventOut,
     RunOut,
@@ -12,7 +12,7 @@ from ..schemas import (
     StoryBoardOut,
     StoryDetailOut,
 )
-from ..services import evidence_pack, referee
+from ..services import challenger, evidence_pack, referee
 from ..services.jira import sync_service
 from ..services.jira.factory import get_adapter
 from ..services.ws import manager
@@ -93,6 +93,20 @@ async def story_health(story_id: str, session: AsyncSession = Depends(get_sessio
     if story is None:
         raise HTTPException(status_code=404, detail="story not found")
     return await referee.assess(session, story_id)
+
+
+@router.get("/{story_id}/challenges")
+async def story_challenges(
+    story_id: str, phase: Phase, session: AsyncSession = Depends(get_session)
+):
+    """Adversarial Challenger: the red-team pass for a gate. For each executed
+    run in the phase it argues AGAINST the results — caveats, severe findings
+    under accepting verdicts, contradictions, blocking questions, uncovered
+    evidence. Advisory only; pinned to the sign-off screen."""
+    story = await session.get(Story, story_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="story not found")
+    return await challenger.challenges_for_gate(session, story_id, phase)
 
 
 @router.get("/{story_id}/evidence-pack")

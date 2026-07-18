@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import AgentRun
 from ..schemas import AcceptRequest, ApproveRequest, RejectRequest, RerunRequest, RunOut
+from ..services import replay as replay_service
 from ..services import workflow
 from ..services.ws import manager
 from .deps import get_session
@@ -58,6 +59,15 @@ async def reject_run(
     await session.commit()
     await _broadcast_run(run)
     return run
+
+
+@router.post("/{run_id}/replay")
+async def replay_run(run_id: str, session: AsyncSession = Depends(get_session)):
+    """Reproducibility check: re-execute with freshly gathered inputs and
+    compare hashes. Persists nothing to the run; audited as RUN_REPLAYED."""
+    report = await replay_service.replay_run(session, run_id, actor="auditor")
+    await session.commit()  # the audit event
+    return report
 
 
 @router.post("/{run_id}/rerun", response_model=RunOut)

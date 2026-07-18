@@ -2,11 +2,14 @@ import type {
   AgentDef,
   AgentInsights,
   Artifact,
+  ChallengeReport,
   ConnectorStatus,
   ArtifactKind,
   AuditEvent,
   Gate,
+  OpHealth,
   PushItem,
+  ReplayReport,
   Run,
   SettingsView,
   StoryBoard,
@@ -49,6 +52,10 @@ const post = <T,>(path: string, body?: unknown) =>
 
 export const api = {
   agentInsights: () => request<AgentInsights>("/insights/agents"),
+  agentOpHealth: () => request<OpHealth>("/insights/agent-health"),
+  replayRun: (id: string) => post<ReplayReport>(`/runs/${id}/replay`),
+  challenges: (storyId: string, phase: string) =>
+    request<ChallengeReport>(`/stories/${storyId}/challenges?phase=${phase}`),
 
   // CI/CD connectors
   copadoStatus: () => request<ConnectorStatus>("/copado/status"),

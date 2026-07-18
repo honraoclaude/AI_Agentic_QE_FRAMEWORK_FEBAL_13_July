@@ -1,0 +1,128 @@
+"""Agent eval harness — measured accuracy against expert-labelled golden cases.
+
+Prompt versions were previously bumped on judgement alone; this harness makes
+them measured. Each agent has golden cases (backend/evals/golden/<agent>.json):
+an input (story + artifacts + upstream) and expert-labelled expectations over
+the structured output, graded deterministically:
+
+- equals      — exact value at a dot-path
+- approx/tol  — numeric within tolerance (financial variances)
+- min_len     — a list must have at least N items
+- contains    — a string field must contain a substring
+
+Runs against the demo path in CI (deterministic — catches fixture/schema
+regressions on every push) and against the real Claude path when an API key is
+present (measures actual model accuracy per prompt version). Same cases, same
+grading — the scorecard is comparable across both.
+"""
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from ..models.enums import Cloud, FcaImpact, Phase
+from .agents.demo_outputs import build
+from .agents.output_schemas import OUTPUT_SCHEMAS
+
+# .../backend/app/services/evals.py -> parents[2] == backend/
+GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "golden"
+
+
+def story_shim(spec: dict) -> SimpleNamespace:
+    """A Story-shaped object built from a golden case (no DB involved)."""
+    fca = spec.get("fca_impact")
+    cloud = spec.get("cloud")
+    return SimpleNamespace(
+        jira_key=spec.get("jira_key", "EVAL-1"),
+        summary=spec.get("summary", ""),
+        description=spec.get("description", ""),
+        acceptance_criteria=spec.get("acceptance_criteria", []),
+        story_points=spec.get("story_points"),
+        sprint=spec.get("sprint"),
+        labels=spec.get("labels", []),
+        priority=spec.get("priority"),
+        fca_impact=FcaImpact(fca) if fca else None,
+        fca_impact_confirmed=bool(spec.get("fca_impact_confirmed")),
+        cloud=Cloud(cloud) if cloud else None,
+        current_phase=Phase(spec.get("current_phase", "TESTING")),
+    )
+
+
+def _at_path(obj: Any, path: str) -> Any:
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, list):
+            cur = cur[int(part)]
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
+def grade(output: dict, expectations: list[dict]) -> list[dict]:
+    results = []
+    for exp in expectations:
+        path = exp["path"]
+        actual = _at_path(output, path)
+        ok, want = True, None
+        if "equals" in exp:
+            want = exp["equals"]
+            ok = actual == want
+        elif "approx" in exp:
+            want = exp["approx"]
+            tol = exp.get("tol", 0.01)
+            try:
+                ok = abs(float(actual) - float(want)) <= tol
+            except (TypeError, ValueError):
+                ok = False
+        elif "min_len" in exp:
+            want = f"len>={exp['min_len']}"
+            ok = isinstance(actual, list) and len(actual) >= exp["min_len"]
+        elif "contains" in exp:
+            want = exp["contains"]
+            ok = isinstance(actual, str) and want.lower() in actual.lower()
+        results.append({"path": path, "expected": want, "actual": actual, "passed": ok})
+    return results
+
+
+def load_cases(agent_key: str) -> list[dict]:
+    f = GOLDEN_DIR / f"{agent_key}.json"
+    if not f.exists():
+        return []
+    return json.loads(f.read_text(encoding="utf-8"))["cases"]
+
+
+def run_agent_evals(agent_key: str) -> dict:
+    """Execute every golden case for an agent on the demo path and grade it.
+    The output is also schema-validated — a structural regression fails red."""
+    cases = load_cases(agent_key)
+    results = []
+    for case in cases:
+        story = story_shim(case.get("story", {}))
+        output = build(
+            agent_key, story, None,
+            artifacts=case.get("artifacts", []),
+            upstream=case.get("upstream", []),
+        )
+        OUTPUT_SCHEMAS[agent_key].model_validate(output)  # structural gate
+        checks = grade(output, case["expect"])
+        results.append({
+            "case": case["name"],
+            "passed": all(c["passed"] for c in checks),
+            "checks": checks,
+        })
+    return {
+        "agent_key": agent_key,
+        "cases": len(results),
+        "passed": sum(1 for r in results if r["passed"]),
+        "failed": sum(1 for r in results if not r["passed"]),
+        "results": results,
+    }
+
+
+def available_agents() -> list[str]:
+    if not GOLDEN_DIR.exists():
+        return []
+    return sorted(p.stem for p in GOLDEN_DIR.glob("*.json"))

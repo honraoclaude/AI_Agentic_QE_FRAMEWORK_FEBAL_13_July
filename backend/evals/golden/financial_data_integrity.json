@@ -1,0 +1,157 @@
+{
+  "agent": "financial_data_integrity",
+  "description": "Expert-labelled cases for the release-blocking financial integrity agent. The labels ARE the defensible asset: they define 'correct' for the control.",
+  "cases": [
+    {
+      "name": "penny_discrepancy_blocks_release",
+      "labelled_by": "QE lead — a £1.63 rollup variance must block, no override",
+      "story": {
+        "jira_key": "EVAL-FIN-1",
+        "summary": "Household net-worth rollup",
+        "acceptance_criteria": [
+          "The household rollup total equals the sum of active account balances",
+          "GBP values are rounded half-up to 2 decimal places"
+        ],
+        "fca_impact": "HIGH",
+        "fca_impact_confirmed": true,
+        "cloud": "FSC"
+      },
+      "artifacts": [
+        {
+          "kind": "FINANCIAL",
+          "filename": "finance_recon.json",
+          "summary": "expected-vs-actual reconciliation",
+          "parsed": {
+            "checks": [
+              {
+                "name": "Household rollup total",
+                "expected": "875000.00",
+                "actual": "875001.63"
+              },
+              {
+                "name": "GBP rounding half-up 2dp",
+                "expected": "1250.00",
+                "actual": "1250.00"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "release_blocking", "equals": true },
+        { "path": "checks.0.variance", "approx": 1.63, "tol": 0.001 },
+        { "path": "checks.0.passed", "equals": false },
+        { "path": "checks.0.severity", "equals": "BLOCKER" },
+        { "path": "checks.1.passed", "equals": true },
+        { "path": "summary", "contains": "release-blocking" }
+      ]
+    },
+    {
+      "name": "clean_reconciliation_passes",
+      "labelled_by": "QE lead — exact reconciliation must pass and not block",
+      "story": {
+        "jira_key": "EVAL-FIN-2",
+        "summary": "Household net-worth rollup",
+        "acceptance_criteria": [
+          "The household rollup total equals the sum of active account balances"
+        ],
+        "fca_impact": "HIGH",
+        "fca_impact_confirmed": true,
+        "cloud": "FSC"
+      },
+      "artifacts": [
+        {
+          "kind": "FINANCIAL",
+          "filename": "finance_recon.json",
+          "summary": "expected-vs-actual reconciliation",
+          "parsed": {
+            "checks": [
+              {
+                "name": "Household rollup total",
+                "expected": "875000.00",
+                "actual": "875000.00"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "PASS" },
+        { "path": "release_blocking", "equals": false },
+        { "path": "checks.0.within_tolerance", "equals": true },
+        { "path": "reconciliation.failed", "equals": 0 }
+      ]
+    },
+    {
+      "name": "rounding_within_penny_tolerance_passes",
+      "labelled_by": "QE lead — rounding checks carry a 1p tolerance",
+      "story": {
+        "jira_key": "EVAL-FIN-3",
+        "summary": "GBP display rounding",
+        "acceptance_criteria": [
+          "GBP values are rounded half-up to 2 decimal places"
+        ],
+        "fca_impact": "MEDIUM",
+        "fca_impact_confirmed": true,
+        "cloud": "FSC"
+      },
+      "artifacts": [
+        {
+          "kind": "FINANCIAL",
+          "filename": "rounding_check.json",
+          "summary": "rounding reconciliation",
+          "parsed": {
+            "checks": [
+              {
+                "name": "GBP rounding half-up boundary",
+                "expected": "1250.00",
+                "actual": "1250.01"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "PASS" },
+        { "path": "release_blocking", "equals": false },
+        { "path": "checks.0.within_tolerance", "equals": true }
+      ]
+    },
+    {
+      "name": "unvalidated_financial_criterion_blocks",
+      "labelled_by": "Compliance officer — a financial AC with no matching check is itself release-blocking",
+      "story": {
+        "jira_key": "EVAL-FIN-4",
+        "summary": "Advisory fee proration",
+        "acceptance_criteria": [
+          "Advisory fee proration is calculated on a 365-day basis"
+        ],
+        "fca_impact": "HIGH",
+        "fca_impact_confirmed": true,
+        "cloud": "FSC"
+      },
+      "artifacts": [
+        {
+          "kind": "FINANCIAL",
+          "filename": "partial_recon.json",
+          "summary": "reconciliation missing the fee check",
+          "parsed": {
+            "checks": [
+              {
+                "name": "Household rollup total",
+                "expected": "875000.00",
+                "actual": "875000.00"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "release_blocking", "equals": true },
+        { "path": "not_validated", "min_len": 1 }
+      ]
+    }
+  ]
+}

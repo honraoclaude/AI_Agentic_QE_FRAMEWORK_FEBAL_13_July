@@ -1,8 +1,16 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { AgentDef, Gate, Run, StoryDetail } from "../types";
 import { Badge, Button, Field, inputCls, Modal, useToast } from "../ui";
+
+const CHALLENGE_KIND_LABEL: Record<string, string> = {
+  CONTRADICTION: "contradiction",
+  BLOCKING_QUESTION: "blocking question",
+  SEVERE_FINDING: "severe finding",
+  UNCOVERED_EVIDENCE: "uncovered evidence",
+  SELF_REPORTED_CAVEAT: "self-reported caveat",
+};
 
 const ROLES = [
   "Product Owner",
@@ -119,6 +127,8 @@ export function GateModal({
         </div>
       )}
 
+      <ChallengePanel storyId={story.id} phase={gate.phase} />
+
       {/* Sign-off record */}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Approver name">
@@ -166,5 +176,48 @@ export function GateModal({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+/** Adversarial Challenger: the red-team pass pinned to the sign-off — the
+ *  strongest case AGAINST the results you are about to attest to. Advisory
+ *  only; it cannot block the gate. */
+function ChallengePanel({ storyId, phase }: { storyId: string; phase: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["challenges", storyId, phase],
+    queryFn: () => api.challenges(storyId, phase),
+  });
+  if (isLoading || !data) return null;
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-ink-faint">
+        Challenger — the case against ({data.count})
+      </h3>
+      {data.count === 0 ? (
+        <div className="rounded border border-line bg-bg/50 px-3 py-2 text-[11px] text-ink-faint">
+          No challenges raised — the red-team pass found nothing to contest.
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {data.challenges.map((c, i) => (
+            <li
+              key={i}
+              className="rounded border border-warn/40 bg-warn/5 px-2.5 py-1.5 text-[11px]"
+            >
+              <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                <Badge className="border-warn/50 bg-warn/10 text-warn">
+                  {CHALLENGE_KIND_LABEL[c.kind] ?? c.kind.toLowerCase()}
+                </Badge>
+                <span className="font-mono text-[10px] text-ink-faint">
+                  {c.agent_name}
+                </span>
+              </div>
+              <div className="text-ink">{c.challenge}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-1.5 text-[10px] italic text-ink-faint">{data.note}</div>
+    </div>
   );
 }

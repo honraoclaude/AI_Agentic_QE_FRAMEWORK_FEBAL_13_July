@@ -245,6 +245,68 @@ export interface StoryHealth {
   inconsistency_count: number;
 }
 
+export interface ReplayReport {
+  run_id: string;
+  agent_key: string;
+  status: "REPRODUCED" | "INPUT_DRIFT" | "OUTPUT_DIVERGED";
+  input_match: boolean;
+  output_match: boolean;
+  drift: string[];
+  original_input_hash: string;
+  replay_input_hash: string;
+  original_output_hash: string;
+  replay_output_hash: string;
+  verdict_stable: boolean;
+  original_verdict: string | null;
+  replay_verdict: string | null;
+  model: string;
+  deterministic: boolean;
+}
+
+export interface AgentOpHealth {
+  agent_key: string;
+  agent_name: string;
+  phase: string;
+  current_prompt_version: string;
+  executed: number;
+  failed: number;
+  failure_rate: number;
+  avg_duration_s: number | null;
+  max_duration_s: number | null;
+  tokens_in: number;
+  tokens_out: number;
+  versions: { version: string; executed: number; failed: number; failure_rate: number }[];
+}
+
+export interface OpHealth {
+  agents: AgentOpHealth[];
+  alerts: { agent_key: string; agent_name: string; kind: string; detail: string }[];
+  summary: {
+    agents_with_runs: number;
+    total_executed: number;
+    total_failed: number;
+    total_tokens_in: number;
+    total_tokens_out: number;
+  };
+}
+
+export interface Challenge {
+  kind: string;
+  agent_key: string;
+  agent_name: string;
+  challenge: string;
+  basis: string;
+}
+
+export interface ChallengeReport {
+  story_id: string;
+  phase: string;
+  challenges: Challenge[];
+  count: number;
+  generated_by: string;
+  note: string;
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

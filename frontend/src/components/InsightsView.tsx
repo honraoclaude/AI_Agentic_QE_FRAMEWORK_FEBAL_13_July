@@ -129,6 +129,123 @@ export function InsightsView() {
           </table>
         </div>
       )}
+
+      <OperationalHealth />
+    </div>
+  );
+}
+
+/** Operational (SRE) health of the fleet — failures, latency, token spend and
+ *  per-prompt-version reliability. Deterministic aggregation; no model calls. */
+function OperationalHealth() {
+  const q = useQuery({
+    queryKey: ["agent-op-health"],
+    queryFn: () => api.agentOpHealth(),
+  });
+  const data = q.data;
+  if (!data || data.agents.length === 0) return null;
+  const s = data.summary;
+  return (
+    <div className="mt-8">
+      <h2 className="mb-1 text-sm font-semibold text-ink">Operational Health</h2>
+      <p className="mb-4 text-[11px] text-ink-dim">
+        The SRE layer: failure rates, latency, token spend and reliability per
+        prompt version — did the last prompt bump regress?
+      </p>
+
+      <div className="mb-4 grid grid-cols-4 gap-3">
+        {[
+          ["Executed runs", String(s.total_executed)],
+          ["Failed", String(s.total_failed)],
+          ["Tokens in", s.total_tokens_in.toLocaleString()],
+          ["Tokens out", s.total_tokens_out.toLocaleString()],
+        ].map(([label, val]) => (
+          <div key={label} className="rounded-lg border border-line bg-panel p-3">
+            <div className="text-lg font-bold text-ink">{val}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {data.alerts.length > 0 && (
+        <div className="mb-4 rounded-lg border border-bad/40 bg-bad/5 p-3">
+          <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-bad">
+            Alerts
+          </h3>
+          <ul className="flex flex-col gap-1 text-[11px] text-bad">
+            {data.alerts.map((a, i) => (
+              <li key={i}>
+                <span className="font-mono text-[10px]">[{a.kind}]</span> {a.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-line bg-panel">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
+              <th className="px-3 py-2 font-medium">Agent</th>
+              <th className="px-3 py-2 font-medium">Executed</th>
+              <th className="px-3 py-2 font-medium">Failure rate</th>
+              <th className="px-3 py-2 font-medium">Avg / max s</th>
+              <th className="px-3 py-2 font-medium">Tokens (in→out)</th>
+              <th className="px-3 py-2 font-medium">By prompt version</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.agents.map((a) => (
+              <tr key={a.agent_key} className="border-b border-line/50 align-top">
+                <td className="px-3 py-2">
+                  <div className="text-ink">{a.agent_name}</div>
+                  <div className="font-mono text-[10px] text-ink-faint">
+                    now {a.current_prompt_version}
+                  </div>
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
+                  {a.executed}
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={`font-mono text-[11px] ${
+                      a.failure_rate >= 0.25
+                        ? "text-bad"
+                        : a.failure_rate > 0
+                          ? "text-warn"
+                          : "text-ok"
+                    }`}
+                  >
+                    {Math.round(a.failure_rate * 100)}%
+                  </span>
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
+                  {a.avg_duration_s ?? "—"} / {a.max_duration_s ?? "—"}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
+                  {a.tokens_in.toLocaleString()}→{a.tokens_out.toLocaleString()}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {a.versions.map((v) => (
+                      <Badge
+                        key={v.version}
+                        className={
+                          v.failure_rate >= 0.25
+                            ? "border-bad/50 bg-bad/10 text-bad"
+                            : "border-line text-ink-dim"
+                        }
+                      >
+                        {v.version}: {v.executed}✓{v.failed > 0 ? ` ${v.failed}✗` : ""}
+                      </Badge>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
