@@ -217,6 +217,19 @@ async def approve_and_run(
 
     artifacts = await artifact_service.gather_for_agent(session, story.id, agent.key)
     upstream = await _gather_upstream(session, story.id, agent.key)
+
+    # Flaky-Test Intelligence feed: failure-reasoning agents receive the known
+    # signature ledger as advisory upstream context (evidence, not tuning).
+    from . import flaky_intel
+
+    if agent.key in flaky_intel.FEED_AGENTS:
+        known = await flaky_intel.known_signatures(session)
+        if known:
+            upstream = [*upstream, {
+                "agent_key": "flaky_intel",
+                "agent_name": "Flaky-Test Intelligence",
+                "output": {"known_flaky_signatures": known},
+            }]
     try:
         result = await engine.execute(
             run,
@@ -268,12 +281,20 @@ async def approve_and_run(
             "release_blocking": bool(run.output_json.get("release_blocking")),
         },
     )
+
+    # Cross-run memory: fingerprint this run's failures into the flaky ledger.
+    if run.agent_key == "test_execution_analyst":
+        await flaky_intel.record_from_run(session, run, story.jira_key)
     return run
 
 
-async def accept_run(session: AsyncSession, run_id: str, actor: str) -> AgentRun:
+async def accept_run(
+    session: AsyncSession, run_id: str, actor: str, reason: str = ""
+) -> AgentRun:
     """Accept the output — unlocks the next agent in sequence, and may make
-    the phase gate ready for sign-off."""
+    the phase gate ready for sign-off. `reason` is the optional acceptance
+    rationale (why the findings are tolerable) — it flows into the Risk
+    Register when the run carries WARN/severe findings."""
     if not actor or not actor.strip():
         raise WorkflowError("actor name is required")
     run = await _get_run(session, run_id)
@@ -284,6 +305,8 @@ async def accept_run(session: AsyncSession, run_id: str, actor: str) -> AgentRun
     run.status = RunStatus.ACCEPTED
     run.decided_by = actor.strip()
     run.decided_at = utcnow()
+    if reason and reason.strip():
+        run.decision_reason = reason.strip()
     await audit.record_event(
         session,
         event_type="RUN_ACCEPTED",
@@ -296,6 +319,11 @@ async def accept_run(session: AsyncSession, run_id: str, actor: str) -> AgentRun
     await _unlock_next_agent(session, run, actor.strip())
     story = await _get_story(session, run.story_id)
     await recompute_gate_readiness(session, story, actor.strip())
+
+    # Accepted-despite decisions become managed positions in the Risk Register.
+    from . import risk_register
+
+    await risk_register.sweep(session, run.story_id)
     return run
 
 
@@ -562,6 +590,11 @@ async def signoff_gate(
             "evidence": gate.evidence,
         },
     )
+
+    # A sign-off over WARN verdicts is an accepted risk — register it.
+    from . import risk_register
+
+    await risk_register.sweep(session, story.id)
 
     nxt = next_phase(story.current_phase)
     if nxt is not None:

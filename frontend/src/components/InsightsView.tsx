@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api";
-import type { AgentPerf } from "../types";
-import { Badge } from "../ui";
+import type { AgentPerf, FlakySig } from "../types";
+import { Badge, Button, useToast } from "../ui";
 
 function trustCls(t: number | null): string {
   if (t === null) return "text-ink-faint";
@@ -53,7 +54,7 @@ function AgentRow({ a }: { a: AgentPerf }) {
   );
 }
 
-export function InsightsView() {
+export function InsightsView({ actor }: { actor: string }) {
   const q = useQuery({ queryKey: ["insights"], queryFn: () => api.agentInsights() });
 
   if (q.isLoading) return <div className="p-6 text-sm text-ink-faint">Loading…</div>;
@@ -131,6 +132,162 @@ export function InsightsView() {
       )}
 
       <OperationalHealth />
+      <FlakyIntel actor={actor} />
+    </div>
+  );
+}
+
+/** Flaky-Test Intelligence — cross-run failure signatures with flake scores
+ *  and an owned, expiring quarantine (no immortal quarantine). */
+function FlakyIntel({ actor }: { actor: string }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [owner, setOwner] = useState("");
+  const [days, setDays] = useState("14");
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const q = useQuery({ queryKey: ["flaky-tests"], queryFn: () => api.flakyTests() });
+
+  const done = (msg: string) => {
+    toast("ok", msg);
+    setEditing(null);
+    queryClient.invalidateQueries({ queryKey: ["flaky-tests"] });
+  };
+  const quarantine = useMutation({
+    mutationFn: (s: FlakySig) =>
+      api.quarantineFlaky(s.id, actor, owner, parseInt(days, 10) || 14, ""),
+    onSuccess: () => done("Signature quarantined — it expires; it doesn't rot."),
+    onError: (e: Error) => toast("error", e.message),
+  });
+  const clear = useMutation({
+    mutationFn: (s: FlakySig) => api.clearFlaky(s.id, actor, "cleared from Insights"),
+    onSuccess: () => done("Signature cleared."),
+    onError: (e: Error) => toast("error", e.message),
+  });
+
+  const data = q.data;
+  if (!data || data.signatures.length === 0) return null;
+  const s = data.summary;
+
+  return (
+    <div className="mt-8">
+      <h2 className="mb-1 text-sm font-semibold text-ink">Flaky-Test Intelligence</h2>
+      <p className="mb-4 text-[11px] text-ink-dim">
+        Cross-run memory: recurring failure signatures fingerprinted across runs and
+        stories. Known flakes are fed back to the Test Execution Analyst and Defect
+        Triage as evidence (“re-run, not defect”). Quarantine requires an owner and an
+        expiry.
+      </p>
+
+      <div className="mb-4 grid grid-cols-4 gap-3">
+        {[
+          ["Signatures", String(s.total)],
+          ["High score (≥50)", String(s.high_score)],
+          ["Quarantined", String(s.quarantined)],
+          ["Expired quarantines", String(s.expired_quarantines)],
+        ].map(([label, val]) => (
+          <div key={label} className="rounded-lg border border-line bg-panel p-3">
+            <div className="text-lg font-bold text-ink">{val}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {data.signatures.map((sig) => (
+          <div
+            key={sig.id}
+            className={`rounded-lg border bg-panel p-3 ${
+              sig.quarantine_expired ? "border-bad/60" : "border-line"
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`font-mono text-[11px] font-bold ${
+                  sig.flake_score >= 50 ? "text-bad" : sig.flake_score >= 25 ? "text-warn" : "text-ink-dim"
+                }`}
+              >
+                {sig.flake_score}
+              </span>
+              <span className="font-mono text-[10px] text-accent">{sig.ref}</span>
+              <span className="text-xs font-medium text-ink">{sig.test_name}</span>
+              <Badge
+                className={
+                  sig.status === "QUARANTINED"
+                    ? "border-warn/50 bg-warn/10 text-warn"
+                    : sig.status === "CLEARED"
+                      ? "border-line text-ink-faint"
+                      : "border-line text-ink-dim"
+                }
+              >
+                {sig.status}
+              </Badge>
+              {sig.quarantine_expired && (
+                <Badge className="border-bad/70 bg-bad/20 font-bold text-bad">
+                  QUARANTINE EXPIRED — review
+                </Badge>
+              )}
+              <span className="ml-auto font-mono text-[10px] text-ink-faint">
+                seen {sig.occurrences}× · {sig.stories_seen.length} story(ies) ·{" "}
+                {sig.flaky_votes} analyst-flaky vote(s)
+                {sig.owner && ` · owner ${sig.owner}`}
+                {sig.quarantine_expiry && ` · until ${sig.quarantine_expiry.slice(0, 10)}`}
+              </span>
+            </div>
+            {sig.normalized_message && (
+              <div className="mt-1 font-mono text-[10px] text-ink-faint">
+                {sig.normalized_message.slice(0, 160)}
+              </div>
+            )}
+            {sig.status !== "CLEARED" && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {editing === sig.id ? (
+                  <>
+                    <input
+                      value={owner}
+                      onChange={(e) => setOwner(e.target.value)}
+                      placeholder="Owner (required)"
+                      className="w-44 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                    />
+                    <input
+                      value={days}
+                      onChange={(e) => setDays(e.target.value)}
+                      placeholder="Days"
+                      className="w-16 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                    />
+                    <Button
+                      variant="primary"
+                      busy={quarantine.isPending}
+                      onClick={() => {
+                        if (!actor.trim()) {
+                          toast("error", "Enter your name in the header first.");
+                          return;
+                        }
+                        quarantine.mutate(sig);
+                      }}
+                    >
+                      Quarantine
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {sig.status !== "QUARANTINED" && (
+                      <Button onClick={() => { setEditing(sig.id); setOwner(""); }}>
+                        ⏸ Quarantine…
+                      </Button>
+                    )}
+                    <Button variant="ghost" busy={clear.isPending} onClick={() => clear.mutate(sig)}>
+                      ✓ Clear (fixed)
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,255 @@
+"""Risk Acceptance Register — the quality-debt ledger.
+
+When a human accepts a run despite WARN/severe findings, signs a gate over
+WARN verdicts, or accepts a CONDITIONAL_GO, that accepted risk used to
+evaporate. The register materialises each such decision into a managed
+position: what was accepted, by whom, why, at what severity, and when it must
+be reviewed (severity-derived window). Entries are OPEN → REVIEWED (re-affirmed,
+window restarts) → CLOSED, and go OVERDUE when the review date passes.
+
+The sweep is deterministic and idempotent (dedupe by source_ref) — safe to run
+on every accept/sign-off and on read. All transitions enter the audit chain.
+"""
+
+from datetime import timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import AgentRun, Gate, GateStatus, RiskAcceptance, RunStatus, Story
+from ..util import utcnow
+from . import audit
+from .agents.output_schemas import severity_rank
+from .agents.registry import AGENTS
+
+# Decision B: review windows by severity (days).
+REVIEW_WINDOW_DAYS = {"BLOCKER": 7, "CRITICAL": 14, "HIGH": 30, "MEDIUM": 60, "LOW": 90}
+
+
+class RegisterError(Exception):
+    pass
+
+
+def _window(severity: str) -> timedelta:
+    return timedelta(days=REVIEW_WINDOW_DAYS.get(severity, 60))
+
+
+def _worst_finding(o: dict) -> tuple[str, dict | None]:
+    worst, worst_f = "MEDIUM", None
+    rank = 0
+    for f in o.get("findings") or []:
+        if not isinstance(f, dict):
+            continue  # defensive: tolerate non-structured findings
+        r = severity_rank(f.get("severity"))
+        if r > rank:
+            rank, worst, worst_f = r, f.get("severity") or "MEDIUM", f
+    return worst, worst_f
+
+
+async def sweep(session: AsyncSession, story_id: str | None = None) -> int:
+    """Materialise register entries from accepted-despite decisions. Returns
+    the number of NEW entries created."""
+    existing = set(
+        (await session.execute(select(RiskAcceptance.source_ref))).scalars().all()
+    )
+
+    run_q = select(AgentRun).where(AgentRun.status == RunStatus.ACCEPTED)
+    gate_q = select(Gate).where(Gate.status == GateStatus.SIGNED_OFF)
+    if story_id:
+        run_q = run_q.where(AgentRun.story_id == story_id)
+        gate_q = gate_q.where(Gate.story_id == story_id)
+    runs = (await session.execute(run_q)).scalars().all()
+    gates = (await session.execute(gate_q)).scalars().all()
+
+    stories: dict[str, Story] = {}
+
+    async def _story(sid: str) -> Story:
+        if sid not in stories:
+            stories[sid] = await session.get(Story, sid)
+        return stories[sid]
+
+    created = 0
+
+    async def _add(entry: RiskAcceptance) -> None:
+        nonlocal created
+        if entry.source_ref in existing:
+            return
+        existing.add(entry.source_ref)
+        session.add(entry)
+        await session.flush()
+        created += 1
+        await audit.record_event(
+            session,
+            event_type="RISK_ACCEPTED",
+            entity_type="risk_acceptance",
+            entity_id=entry.id,
+            actor=entry.accepted_by,
+            payload={
+                "jira_key": entry.jira_key, "source": entry.source,
+                "severity": entry.severity, "title": entry.title,
+                "review_by": entry.review_by.isoformat(),
+            },
+        )
+
+    # 1. Runs accepted despite WARN verdict or HIGH+ findings.
+    for run in runs:
+        o = run.output_json or {}
+        verdict = o.get("verdict")
+        worst, worst_f = _worst_finding(o)
+        risky = verdict == "WARN" or (
+            worst_f is not None and severity_rank(worst) >= severity_rank("HIGH")
+        )
+        if not risky:
+            continue
+        story = await _story(run.story_id)
+        sev = worst if worst_f is not None else "MEDIUM"
+        agent_name = AGENTS[run.agent_key].name if run.agent_key in AGENTS else run.agent_key
+        title = (
+            worst_f.get("title") if worst_f
+            else f"{agent_name} accepted with verdict WARN"
+        )
+        await _add(RiskAcceptance(
+            story_id=run.story_id, jira_key=story.jira_key,
+            source_ref=f"run:{run.id}", source="RUN_ACCEPTED_WITH_FINDINGS",
+            agent_key=run.agent_key, phase=run.phase.value,
+            severity=sev, title=str(title)[:250],
+            detail=(worst_f.get("detail") if worst_f else o.get("summary", ""))[:2000],
+            accepted_by=run.decided_by or "unknown",
+            rationale=run.decision_reason or "",
+            accepted_at=run.decided_at or utcnow(),
+            review_by=(run.decided_at or utcnow()) + _window(sev),
+        ))
+
+        # 1b. CONDITIONAL_GO on an accepted Deployment Risk run.
+        if run.agent_key == "deployment_risk" and o.get("recommendation") == "CONDITIONAL_GO":
+            conditions = o.get("conditions") or []
+            await _add(RiskAcceptance(
+                story_id=run.story_id, jira_key=story.jira_key,
+                source_ref=f"run:{run.id}:conditional_go", source="CONDITIONAL_GO",
+                agent_key=run.agent_key, phase=run.phase.value,
+                severity="HIGH",
+                title="CONDITIONAL_GO accepted",
+                detail="Conditions: " + "; ".join(str(c) for c in conditions[:6]),
+                accepted_by=run.decided_by or "unknown",
+                rationale=run.decision_reason or "",
+                accepted_at=run.decided_at or utcnow(),
+                review_by=(run.decided_at or utcnow()) + _window("HIGH"),
+            ))
+
+    # 2. Gates signed off while the phase held WARN verdicts.
+    latest_by_story_agent: dict[tuple[str, str], AgentRun] = {}
+    for run in runs:  # accepted runs only — the evidence the gate stood on
+        key = (run.story_id, run.agent_key)
+        cur = latest_by_story_agent.get(key)
+        if cur is None or run.attempt > cur.attempt:
+            latest_by_story_agent[key] = run
+    for gate in gates:
+        warn_agents = [
+            AGENTS[r.agent_key].name if r.agent_key in AGENTS else r.agent_key
+            for (sid, _), r in latest_by_story_agent.items()
+            if sid == gate.story_id and r.phase == gate.phase
+            and (r.output_json or {}).get("verdict") == "WARN"
+        ]
+        if not warn_agents:
+            continue
+        story = await _story(gate.story_id)
+        await _add(RiskAcceptance(
+            story_id=gate.story_id, jira_key=story.jira_key,
+            source_ref=f"gate:{gate.id}", source="GATE_SIGNED_OVER_WARN",
+            agent_key=None, phase=gate.phase.value,
+            severity="MEDIUM",
+            title=f"{gate.phase.value.title()} gate signed off over "
+            f"{len(warn_agents)} WARN verdict(s)",
+            detail="WARN from: " + ", ".join(warn_agents),
+            accepted_by=gate.approver_name or "unknown",
+            rationale=gate.rationale or "",
+            accepted_at=gate.decided_at or utcnow(),
+            review_by=(gate.decided_at or utcnow()) + _window("MEDIUM"),
+        ))
+
+    return created
+
+
+def _serialize(e: RiskAcceptance) -> dict:
+    now = utcnow()
+    return {
+        "id": e.id, "story_id": e.story_id, "jira_key": e.jira_key,
+        "source": e.source, "agent_key": e.agent_key, "phase": e.phase,
+        "severity": e.severity, "title": e.title, "detail": e.detail,
+        "accepted_by": e.accepted_by, "rationale": e.rationale,
+        "accepted_at": e.accepted_at.isoformat() if e.accepted_at else None,
+        "review_by": e.review_by.isoformat() if e.review_by else None,
+        "status": e.status,
+        "overdue": e.status != "CLOSED" and e.review_by is not None
+        and e.review_by.replace(tzinfo=None) < now.replace(tzinfo=None),
+        "reviewed_by": e.reviewed_by, "review_note": e.review_note,
+        "closed_by": e.closed_by, "closure_note": e.closure_note,
+    }
+
+
+async def list_register(
+    session: AsyncSession, story_id: str | None = None, status: str | None = None
+) -> dict:
+    await sweep(session, story_id)  # idempotent — the read is always current
+    q = select(RiskAcceptance).order_by(RiskAcceptance.accepted_at.desc())
+    if story_id:
+        q = q.where(RiskAcceptance.story_id == story_id)
+    if status:
+        q = q.where(RiskAcceptance.status == status)
+    entries = [(_serialize(e)) for e in (await session.execute(q)).scalars().all()]
+    open_entries = [e for e in entries if e["status"] != "CLOSED"]
+    return {
+        "entries": entries,
+        "summary": {
+            "total": len(entries),
+            "open": len(open_entries),
+            "overdue": sum(1 for e in open_entries if e["overdue"]),
+            "by_severity": {
+                s: sum(1 for e in open_entries if e["severity"] == s)
+                for s in ("BLOCKER", "CRITICAL", "HIGH", "MEDIUM", "LOW")
+                if any(e["severity"] == s for e in open_entries)
+            },
+        },
+    }
+
+
+async def _get(session: AsyncSession, entry_id: str) -> RiskAcceptance:
+    e = await session.get(RiskAcceptance, entry_id)
+    if e is None:
+        raise RegisterError("register entry not found")
+    return e
+
+
+async def review(session: AsyncSession, entry_id: str, actor: str, note: str) -> dict:
+    """Re-affirm the acceptance: still a known, tolerated risk. The review
+    window restarts from now."""
+    e = await _get(session, entry_id)
+    if e.status == "CLOSED":
+        raise RegisterError("entry is closed")
+    e.status = "REVIEWED"
+    e.reviewed_by = actor
+    e.reviewed_at = utcnow()
+    e.review_note = note
+    e.review_by = utcnow() + _window(e.severity)
+    await audit.record_event(
+        session, event_type="RISK_REVIEWED", entity_type="risk_acceptance",
+        entity_id=e.id, actor=actor,
+        payload={"jira_key": e.jira_key, "title": e.title, "note": note,
+                 "next_review_by": e.review_by.isoformat()},
+    )
+    return _serialize(e)
+
+
+async def close(session: AsyncSession, entry_id: str, actor: str, note: str) -> dict:
+    """The risk no longer exists (fixed, descoped, or superseded)."""
+    e = await _get(session, entry_id)
+    e.status = "CLOSED"
+    e.closed_by = actor
+    e.closed_at = utcnow()
+    e.closure_note = note
+    await audit.record_event(
+        session, event_type="RISK_CLOSED", entity_type="risk_acceptance",
+        entity_id=e.id, actor=actor,
+        payload={"jira_key": e.jira_key, "title": e.title, "note": note},
+    )
+    return _serialize(e)

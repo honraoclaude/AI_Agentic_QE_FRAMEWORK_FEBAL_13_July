@@ -1811,6 +1811,31 @@ def test_execution_analyst(story: Story, artifacts=None, upstream=None) -> dict:
             }
         )
 
+    # Flaky-Test Intelligence: annotate failures that match known cross-run
+    # signatures — advisory memory, so a known flake reads "re-run, not defect".
+    flaky_known = (_upstream_output(upstream, "flaky_intel") or {}).get(
+        "known_flaky_signatures", []
+    )
+    flaky_by_name = {k.get("test_name"): k for k in flaky_known}
+    flaky_matched = []
+    for f in failures:
+        k = flaky_by_name.get(f["test_name"])
+        if not k:
+            continue
+        flaky_matched.append(k)
+        f["likely_flaky"] = True
+        f["rerun_recommended"] = True
+        f["detail"] = (
+            f"{f['detail']} [matches known flaky signature {k.get('id')} — seen "
+            f"{k.get('occurrences')}× across {k.get('stories_seen')} story(ies)"
+            + (", QUARANTINED" if k.get("status") == "QUARANTINED" else "")
+            + "]"
+        )
+        f["suggested_action"] = (
+            "Re-run before triaging — matches a known flaky signature"
+            + (f" (quarantine owner: {k.get('owner')})" if k.get("owner") else "")
+        )
+
     # Un-executed @fca scenarios: no executed test name shares keywords.
     all_tests = junit.get("all_tests", [])
 
@@ -1853,7 +1878,19 @@ def test_execution_analyst(story: Story, artifacts=None, upstream=None) -> dict:
                 else "No FCA-scenario failures."
             )
         ),
-        "findings": [],
+        "findings": (
+            [
+                {
+                    "title": f"{len(flaky_matched)} failure(s) match known flaky "
+                    "signatures",
+                    "detail": ", ".join(str(k.get("id")) for k in flaky_matched[:5])
+                    + " — recommend re-run before raising defects.",
+                    "severity": "LOW",
+                }
+            ]
+            if flaky_matched
+            else []
+        ),
         "release_blocking": blocking,
         "run_summary": {
             "total": total,
@@ -2216,6 +2253,29 @@ def defect_triage(story: Story, artifacts=None, upstream=None) -> dict:
                 "suspected_component": "householdSummary LWC test",
                 "severity": "LOW",
             })
+    # Flaky-Test Intelligence: reclassify clusters whose tests all match known
+    # cross-run flaky signatures — don't raise defects for known flakes.
+    flaky_known = (_upstream_output(upstream, "flaky_intel") or {}).get(
+        "known_flaky_signatures", []
+    )
+    known_names = {k.get("test_name") for k in flaky_known}
+    flaky_notes = []
+    if known_names:
+        for c in clusters:
+            matched = [t for t in c["tests"] if t in known_names]
+            if matched and len(matched) == len(c["tests"]):
+                c["classification"] = "FLAKY"
+                c["suspected_root_cause"] = (
+                    "All tests in this cluster match known flaky signatures — "
+                    "recommend re-run over a defect. "
+                    + c["suspected_root_cause"]
+                )
+                # Withdraw any suggested defect raised from this cluster.
+                suggested = [
+                    d for d in suggested if d.get("from_cluster") != c["signature"]
+                ]
+                flaky_notes.append(c["signature"])
+
     flaky_count = sum(1 for c in clusters if c["classification"] == "FLAKY")
     has_product = any(c["classification"] == "PRODUCT_DEFECT" for c in clusters)
     verdict = "FAIL" if any(c["severity"] in ("BLOCKER", "CRITICAL") and c["classification"] == "PRODUCT_DEFECT" for c in clusters) \

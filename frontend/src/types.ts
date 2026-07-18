@@ -337,6 +337,68 @@ export interface PipelineView {
   gates: Record<string, { id: string; status: GateStatus }>;
 }
 
+export interface RiskEntry {
+  id: string;
+  story_id: string;
+  jira_key: string;
+  source: string;
+  agent_key: string | null;
+  phase: string;
+  severity: string;
+  title: string;
+  detail: string;
+  accepted_by: string;
+  rationale: string;
+  accepted_at: string | null;
+  review_by: string | null;
+  status: "OPEN" | "REVIEWED" | "CLOSED";
+  overdue: boolean;
+  reviewed_by: string | null;
+  review_note: string;
+  closed_by: string | null;
+  closure_note: string;
+}
+
+export interface RiskRegisterData {
+  entries: RiskEntry[];
+  summary: {
+    total: number;
+    open: number;
+    overdue: number;
+    by_severity: Record<string, number>;
+  };
+}
+
+export interface FlakySig {
+  id: string;
+  ref: string;
+  signature: string;
+  test_name: string;
+  normalized_message: string;
+  occurrences: number;
+  flaky_votes: number;
+  stories_seen: string[];
+  runs_seen: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  flake_score: number;
+  status: "WATCH" | "QUARANTINED" | "CLEARED";
+  owner: string | null;
+  quarantine_expiry: string | null;
+  quarantine_expired: boolean;
+  note: string;
+}
+
+export interface FlakyLedger {
+  signatures: FlakySig[];
+  summary: {
+    total: number;
+    quarantined: number;
+    expired_quarantines: number;
+    high_score: number;
+  };
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

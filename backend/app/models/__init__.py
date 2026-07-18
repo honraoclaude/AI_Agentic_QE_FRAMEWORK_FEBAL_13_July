@@ -17,8 +17,10 @@ from .enums import (
     ScopeStatus,
     next_phase,
 )
+from .flaky_signature import FlakySignature
 from .gate import Gate
 from .push_queue import PushQueueItem
+from .risk_acceptance import RiskAcceptance
 from .story import Story
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "AuditEvent",
     "Cloud",
     "FcaImpact",
+    "FlakySignature",
     "Gate",
     "GateStatus",
     "PHASE_ORDER",
@@ -38,6 +41,7 @@ __all__ = [
     "PushQueueItem",
     "PushStatus",
     "PushType",
+    "RiskAcceptance",
     "RunStatus",
     "ScopeStatus",
     "Story",

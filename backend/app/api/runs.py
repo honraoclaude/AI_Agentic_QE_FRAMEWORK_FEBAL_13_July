@@ -45,7 +45,7 @@ async def approve_and_run(
 async def accept_run(
     run_id: str, body: AcceptRequest, session: AsyncSession = Depends(get_session)
 ):
-    run = await workflow.accept_run(session, run_id, body.actor)
+    run = await workflow.accept_run(session, run_id, body.actor, body.reason)
     await session.commit()
     await _broadcast_run(run)
     return run

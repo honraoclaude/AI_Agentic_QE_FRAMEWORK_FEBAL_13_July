@@ -142,6 +142,9 @@ class ApproveRequest(BaseModel):
 
 class AcceptRequest(BaseModel):
     actor: str = Field(min_length=1, max_length=128)
+    # Optional acceptance rationale — requested by the UI when accepting a run
+    # that carries WARN/severe findings; flows into the Risk Register.
+    reason: str = Field(default="", max_length=4000)
 
 
 # Free-text fields are bounded so a client can't push unbounded payloads

@@ -22,8 +22,9 @@ from .agents.registry import get_agent
 from . import referee
 
 # Challenges ordered strongest-first by this rank.
-_PRIORITY = {"CONTRADICTION": 0, "BLOCKING_QUESTION": 1, "SEVERE_FINDING": 2,
-             "UNCOVERED_EVIDENCE": 3, "SELF_REPORTED_CAVEAT": 4}
+_PRIORITY = {"OPEN_ACCEPTED_RISKS": 0, "CONTRADICTION": 1, "BLOCKING_QUESTION": 2,
+             "SEVERE_FINDING": 3, "UNCOVERED_EVIDENCE": 4,
+             "SELF_REPORTED_CAVEAT": 5}
 
 
 def _name(key: str) -> str:
@@ -110,6 +111,24 @@ async def challenges_for_gate(session: AsyncSession, story_id: str, phase: Phase
     latest = await referee._latest_runs(session, story_id)
     challenges = deterministic_challenges(latest, phase)
     generated_by = "deterministic"
+
+    # Risk Register cross-reference: you are signing over N open accepted
+    # risks — the quality debt this story already carries.
+    from . import risk_register
+
+    register = await risk_register.list_register(session, story_id)
+    open_entries = [e for e in register["entries"] if e["status"] != "CLOSED"]
+    if open_entries:
+        overdue = [e for e in open_entries if e["overdue"]]
+        worst = open_entries[0]
+        challenges.insert(0, _challenge(
+            "OPEN_ACCEPTED_RISKS", "risk_register",
+            f"This story carries {len(open_entries)} OPEN accepted risk(s)"
+            + (f", {len(overdue)} OVERDUE for review" if overdue else "")
+            + f" — e.g. “{worst['title'][:100]}” ({worst['severity']}, accepted by "
+            f"{worst['accepted_by']}). Signing adds to that position knowingly.",
+            "risk-acceptance register"))
+        challenges.sort(key=lambda c: _PRIORITY.get(c["kind"], 9))
 
     # Real-model augmentation is deliberately deferred: the deterministic pass
     # is reproducible and auditable, which a regulated gate values more than

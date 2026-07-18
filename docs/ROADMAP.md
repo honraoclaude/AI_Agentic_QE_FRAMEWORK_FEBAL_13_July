@@ -145,19 +145,22 @@ blockable — and compare verdicts with what actually happened.*
   quick human confirm; real-path model cost is N×26 calls (demo path free).
 - **When:** the moment the framework meets a real team with real history.
 
-### 📌 PARKED — QE value-add shortlist (2026-07-18 analysis)
-*Ranked; #1 was the recommendation when discussed.*
-1. **Risk Acceptance Register / quality-debt ledger (M)** — every
-   accepted-despite decision (WARN sign-off, CONDITIONAL_GO, accept over HIGH
-   findings) becomes a register entry: what/who/rationale/severity/review-by
-   date. Register tab + Challenger cross-reference ("3rd risk of this type
-   still open") + Evidence Pack section; stale entries escalate. SYSC-style
-   risk register — sign-offs become managed positions, not terminal events.
-   ~90% of the data already persisted (decision_reason, rationale, findings).
-2. **Flaky-Test Intelligence (M)** — cross-run failure-signature ledger with
-   flake scores and a quarantine list carrying OWNER + EXPIRY (quarantine that
-   never expires is how suites rot); feeds Test Execution Analyst as upstream
-   evidence. Stateful QE memory without FCA self-tuning concerns.
+### 📌 QE value-add shortlist (2026-07-18 analysis)
+1. ✅ **SHIPPED — Risk Acceptance Register / quality-debt ledger** — every
+   accepted-despite decision (run accepted over WARN/HIGH+ findings, gate
+   signed over WARNs, CONDITIONAL_GO) auto-materialises into a register entry
+   with owner, rationale (optional prompt on risky Accept), severity-derived
+   review-by window (7/14/30/60/90d), OPEN → REVIEWED → CLOSED + OVERDUE
+   escalation. Surfaced in: Risk Register tab, the Challenger at gate sign-off
+   ("signing over N open accepted risks"), the Evidence Pack (§6), and
+   RISK_ACCEPTED/REVIEWED/CLOSED audit events. `GET /risk-register`.
+2. ✅ **SHIPPED — Flaky-Test Intelligence** — cross-run failure-signature
+   ledger (volatile parts normalised, so the same failure matches across
+   runs/stories) with flake scores; owned + EXPIRING quarantine (1-90d,
+   expired → flagged for review, never silently extended); fed back to Test
+   Execution Analyst + Defect Triage as advisory upstream evidence ("matches
+   FLK-…, seen 7× — re-run, not defect"; all-known-flaky clusters withdraw
+   their suggested defect). Insights tab section. `GET /insights/flaky-tests`.
 3. **Synthetic FCA-safe data generator (M)** — generate deterministic seeded
    fixtures (households/accounts, GBP edge cases) directly from BDD example
    cards (EX-1.3 "pending excluded" → a fixture containing exactly that);

@@ -81,6 +81,13 @@ async def assemble(session: AsyncSession, story: Story) -> dict:
     ]
     skipped.sort(key=lambda s: (s["phase"], s["agent_name"]))
 
+    # Risk acceptances: what was knowingly accepted, by whom, and its review
+    # state — the auditor's "show me what you tolerated" section.
+    from . import risk_register
+
+    register = await risk_register.list_register(session, story.id)
+    pack["risk_acceptances"] = register
+
     pack["platform"] = PLATFORM
     pack["health"] = health
     pack["agents"] = agents
@@ -133,6 +140,18 @@ def render_html(pack: dict) -> str:
             _e(a["confidence"]), _e(a["prompt_version"]), _e(a["model"]),
             _e((a["tokens"] or {}).get("input_tokens", 0)) + "/" + _e((a["tokens"] or {}).get("output_tokens", 0)),
             f'<code>{_e((a["output_hash"] or "")[:16])}</code>',
+        ],
+    )
+    risk_rows = _rows(
+        (pack.get("risk_acceptances") or {}).get("entries", []),
+        lambda r: [
+            f'<span class="pill {"bad" if r["severity"] in ("BLOCKER", "CRITICAL", "HIGH") else "muted"}">{_e(r["severity"])}</span>',
+            _e(r["title"]),
+            _e(r["source"].replace("_", " ").lower()),
+            _e(r["accepted_by"]),
+            _e(r["rationale"] or "—"),
+            f'{_e(r["status"])}{" · OVERDUE" if r["overdue"] else ""}',
+            _e((r["review_by"] or "")[:10]),
         ],
     )
     event_rows = _rows(
@@ -257,10 +276,17 @@ def render_html(pack: dict) -> str:
 <tbody>{agent_rows}</tbody></table>
 {skipped_note}
 
-<h2>6 · Regulatory Audit Narrative</h2>
+<h2>6 · Risk Acceptances (quality-debt register)</h2>
+<p class="muted">Every knowingly-accepted risk: run accepted despite findings,
+gate signed over WARN verdicts, or CONDITIONAL_GO — with owner, rationale and
+review state.</p>
+<table><thead><tr><th>Severity</th><th>Accepted risk</th><th>Source</th><th>Accepted by</th><th>Rationale</th><th>Status</th><th>Review by</th></tr></thead>
+<tbody>{risk_rows or '<tr><td colspan="7" class="muted">No accepted risks on record — nothing was signed over findings.</td></tr>'}</tbody></table>
+
+<h2>7 · Regulatory Audit Narrative</h2>
 {audit_sections}
 
-<h2>7 · Audit Event Log (append-only)</h2>
+<h2>8 · Audit Event Log (append-only)</h2>
 <table><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Actor</th><th>Hash</th></tr></thead>
 <tbody>{event_rows}</tbody></table>
 

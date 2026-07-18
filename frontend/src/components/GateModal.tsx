@@ -5,6 +5,7 @@ import type { AgentDef, Gate, Run, StoryDetail } from "../types";
 import { Badge, Button, Field, inputCls, Modal, useToast } from "../ui";
 
 const CHALLENGE_KIND_LABEL: Record<string, string> = {
+  OPEN_ACCEPTED_RISKS: "open accepted risks",
   CONTRADICTION: "contradiction",
   BLOCKING_QUESTION: "blocking question",
   SEVERE_FINDING: "severe finding",

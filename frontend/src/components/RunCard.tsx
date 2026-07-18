@@ -1516,7 +1516,7 @@ export function RunCard({
   actor: string;
   requireActor: () => boolean;
 }) {
-  const [modal, setModal] = useState<"reject" | "rerun" | null>(null);
+  const [modal, setModal] = useState<"reject" | "rerun" | "accept" | null>(null);
   const [text, setText] = useState("");
   const [pushPreview, setPushPreview] = useState<PushItem | null>(null);
   const [view, setView] = useState<"output" | "input">("output");
@@ -1678,7 +1678,20 @@ export function RunCard({
                 <Button
                   variant="ok"
                   busy={act.isPending}
-                  onClick={guard(() => act.mutate(() => api.acceptRun(run.id, actor)))}
+                  onClick={guard(() => {
+                    // Accepting despite WARN/severe findings is a risk
+                    // acceptance — ask for the (optional) rationale, which
+                    // flows into the Risk Register.
+                    const o = run.output_json ?? {};
+                    const findings = (o.findings ?? []) as Array<{ severity?: string }>;
+                    const risky =
+                      o.verdict === "WARN" ||
+                      findings.some((f) =>
+                        ["HIGH", "CRITICAL", "BLOCKER"].includes(f.severity ?? ""),
+                      );
+                    if (risky) setModal("accept");
+                    else act.mutate(() => api.acceptRun(run.id, actor));
+                  })}
                 >
                   ✓ Accept
                 </Button>
@@ -1763,17 +1776,32 @@ export function RunCard({
 
       {modal && (
         <Modal
-          title={modal === "reject" ? "Reject agent output" : "Request re-run with guidance"}
+          title={
+            modal === "reject"
+              ? "Reject agent output"
+              : modal === "accept"
+                ? "Accept despite findings — risk acceptance"
+                : "Request re-run with guidance"
+          }
           onClose={() => {
             setModal(null);
             setText("");
           }}
         >
+          {modal === "accept" && (
+            <p className="mb-2 text-[11px] text-ink-dim">
+              This output carries WARN/severe findings. Accepting it registers a
+              managed risk in the <b>Risk Register</b> with a review date — your
+              rationale (optional) is recorded with it.
+            </p>
+          )}
           <Field
             label={
               modal === "reject"
                 ? "Rejection reason (recorded immutably)"
-                : "Guidance — injected into the agent's next prompt"
+                : modal === "accept"
+                  ? "Acceptance rationale (optional — why are the findings tolerable?)"
+                  : "Guidance — injected into the agent's next prompt"
             }
           >
             <textarea
@@ -1785,7 +1813,9 @@ export function RunCard({
               placeholder={
                 modal === "reject"
                   ? "Why is this output not acceptable?"
-                  : "e.g. Focus on Consumer Duty outcomes; include negative paths for closed accounts"
+                  : modal === "accept"
+                    ? "e.g. Known issue — fix scheduled for Sprint 14; risk contained to internal users"
+                    : "e.g. Focus on Consumer Duty outcomes; include negative paths for closed accounts"
               }
             />
           </Field>
@@ -1794,21 +1824,27 @@ export function RunCard({
               Cancel
             </Button>
             <Button
-              variant={modal === "reject" ? "danger" : "primary"}
-              disabled={!text.trim()}
+              variant={modal === "reject" ? "danger" : modal === "accept" ? "ok" : "primary"}
+              disabled={modal !== "accept" && !text.trim()}
               busy={act.isPending}
               onClick={() => {
                 const value = text.trim();
                 act.mutate(() =>
                   modal === "reject"
                     ? api.rejectRun(run.id, actor, value)
-                    : api.rerunRun(run.id, actor, value),
+                    : modal === "accept"
+                      ? api.acceptRun(run.id, actor, value)
+                      : api.rerunRun(run.id, actor, value),
                 );
                 setModal(null);
                 setText("");
               }}
             >
-              {modal === "reject" ? "Reject" : "Create re-run"}
+              {modal === "reject"
+                ? "Reject"
+                : modal === "accept"
+                  ? "✓ Accept & register risk"
+                  : "Create re-run"}
             </Button>
           </div>
         </Modal>

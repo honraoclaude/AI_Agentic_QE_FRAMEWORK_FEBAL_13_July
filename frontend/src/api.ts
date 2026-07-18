@@ -6,11 +6,15 @@ import type {
   ConnectorStatus,
   ArtifactKind,
   AuditEvent,
+  FlakyLedger,
+  FlakySig,
   Gate,
   OpHealth,
   PipelineView,
   PushItem,
   ReplayReport,
+  RiskEntry,
+  RiskRegisterData,
   Run,
   SettingsView,
   StoryBoard,
@@ -58,6 +62,19 @@ export const api = {
   challenges: (storyId: string, phase: string) =>
     request<ChallengeReport>(`/stories/${storyId}/challenges?phase=${phase}`),
 
+  riskRegister: (storyId?: string) =>
+    request<RiskRegisterData>(`/risk-register${storyId ? `?story_id=${storyId}` : ""}`),
+  reviewRisk: (id: string, actor: string, note: string) =>
+    post<RiskEntry>(`/risk-register/${id}/review`, { actor, note }),
+  closeRisk: (id: string, actor: string, note: string) =>
+    post<RiskEntry>(`/risk-register/${id}/close`, { actor, note }),
+
+  flakyTests: () => request<FlakyLedger>("/insights/flaky-tests"),
+  quarantineFlaky: (id: string, actor: string, owner: string, expiry_days: number, note: string) =>
+    post<FlakySig>(`/insights/flaky-tests/${id}/quarantine`, { actor, owner, expiry_days, note }),
+  clearFlaky: (id: string, actor: string, note: string) =>
+    post<FlakySig>(`/insights/flaky-tests/${id}/clear`, { actor, note }),
+
   // CI/CD connectors
   copadoStatus: () => request<ConnectorStatus>("/copado/status"),
   copadoSimulate: (jira_key: string, environment: string) =>
@@ -89,7 +106,8 @@ export const api = {
 
   approveRun: (id: string, approver: string) =>
     post<Run>(`/runs/${id}/approve`, { approver }),
-  acceptRun: (id: string, actor: string) => post<Run>(`/runs/${id}/accept`, { actor }),
+  acceptRun: (id: string, actor: string, reason = "") =>
+    post<Run>(`/runs/${id}/accept`, { actor, reason }),
   rejectRun: (id: string, actor: string, reason: string) =>
     post<Run>(`/runs/${id}/reject`, { actor, reason }),
   rerunRun: (id: string, actor: string, guidance: string) =>
