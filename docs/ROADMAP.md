@@ -173,10 +173,28 @@ blockable — and compare verdicts with what actually happened.*
 - 🟡 **Approval SLAs + escalation (S)** and **Slack/Teams notifications (S)** wired
   to the existing work queue.
 
-### 📌 PARKED — Stakeholder reporting (report-per-decision, not one dashboard)
-*Discussed, not yet agreed. Principle: a report serves one decision; five reports
-for five personas over one shared vocabulary (same severity scale, health band,
-confidence, trust scores) so numbers never contradict across views.*
+### ✅ SHIPPED — Stakeholder reporting (report-per-decision, not one dashboard)
+*Built 2026-07-19 per the agreed plan: four audiences over one shared
+vocabulary; standards adopted = DORA subset (honest labels: rework ≠ CFR
+until the Escape Loop lands) + classic QE metrics + Consumer-Duty MI framing.*
+- **Release entity** (JSON story linkage — the grain leadership thinks in;
+  also the future hook for Copado Phase-2 gating) + **sealed MI snapshots**:
+  `ReportSnapshot` with canonical hash recorded in the audit chain
+  (REPORT_SEALED) — "the numbers the board saw" stay reproducible. Live
+  previews clearly UNSEALED.
+- **Exec MI pack** (per release, sealable, print-ready HTML): Release
+  Confidence Index (referee rollup), quality-debt position, regulatory
+  evidence completeness, AI-governance line, lead time / rework.
+- **Flow (PM/PO, live):** gate cycle times, HITL queue depth + decision
+  latency, blocking-question aging. **Quality (BA/QA, live):** traceability
+  integrity, pyramid, first-time-right per agent, flake index.
+  **Worklist (Dev, live):** findings strongest-first per story.
+- UI: Reports tab (4 sub-views); `/reports/*` endpoints.
+
+*(Original parked design kept below for reference.)*
+*Principle: a report serves one decision; reports per persona over one shared
+vocabulary (same severity scale, health band, confidence, trust scores) so
+numbers never contradict across views.*
 
 | Persona | Decision | Grain | Cadence | Hero metric | Backed by |
 |---|---|---|---|---|---|

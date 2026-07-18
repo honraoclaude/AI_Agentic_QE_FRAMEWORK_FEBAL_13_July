@@ -17,6 +17,7 @@ from .api import (
     insights,
     jira,
     push,
+    reports,
     risk_register,
     runs,
     settings,
@@ -105,6 +106,7 @@ app.include_router(copado.router, prefix=API_PREFIX)
 app.include_router(github.router, prefix=API_PREFIX)
 app.include_router(insights.router, prefix=API_PREFIX)
 app.include_router(risk_register.router, prefix=API_PREFIX)
+app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(demo.router, prefix=API_PREFIX)
 app.include_router(ws.router)
 

@@ -20,6 +20,7 @@ from .enums import (
 from .flaky_signature import FlakySignature
 from .gate import Gate
 from .push_queue import PushQueueItem
+from .release import Release, ReportSnapshot
 from .risk_acceptance import RiskAcceptance
 from .story import Story
 
@@ -41,6 +42,8 @@ __all__ = [
     "PushQueueItem",
     "PushStatus",
     "PushType",
+    "Release",
+    "ReportSnapshot",
     "RiskAcceptance",
     "RunStatus",
     "ScopeStatus",

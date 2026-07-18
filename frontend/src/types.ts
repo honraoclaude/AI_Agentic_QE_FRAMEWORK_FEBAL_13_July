@@ -399,6 +399,110 @@ export interface FlakyLedger {
   };
 }
 
+// ---- Stakeholder reporting ----
+
+export interface ReleaseSummary {
+  id: string;
+  name: string;
+  target_date: string;
+  status: string;
+  story_ids: string[];
+  snapshots: {
+    id: string;
+    kind: string;
+    payload_hash: string;
+    generated_by: string;
+    created_at: string | null;
+  }[];
+}
+
+export interface MiPack {
+  release: { id: string; name: string; target_date: string; status: string; stories: number };
+  generated_at: string;
+  confidence_index: number | null;
+  bands: Record<string, number>;
+  stories: {
+    jira_key: string;
+    summary: string;
+    phase: string;
+    released: boolean;
+    score: number | null;
+    band: string;
+    blockers: number;
+    inconsistencies: number;
+  }[];
+  quality_debt: { open: number; overdue: number; by_severity: Record<string, number> };
+  regulatory_evidence: {
+    stories_with_fca_evidence_complete: number;
+    fca_scenarios_unexecuted: number;
+    financial_checks: number;
+    financial_checks_failed: number;
+  };
+  ai_governance: {
+    runs_executed: number;
+    human_decided_pct: number | null;
+    override_rate: number | null;
+    first_time_right_rate: number | null;
+  };
+  flow: {
+    stories_released: number;
+    avg_lead_time_days: number | null;
+    rework_story_rate: number | null;
+  };
+}
+
+export interface FlowReport {
+  generated_at: string;
+  gate_cycle_times: { phase: string; avg_days: number; gates: number }[];
+  hitl_queue: {
+    depth: number;
+    runs: { kind: string; jira_key: string; agent: string; age_days: number }[];
+    gates_ready: { jira_key: string; phase: string; age_days: number }[];
+    avg_decision_latency_days: number | null;
+  };
+  blocking_questions: { jira_key: string; question: string; owner: string; age_days: number }[];
+}
+
+export interface QualityReport {
+  generated_at: string;
+  traceability: {
+    jira_key: string;
+    ac_total: number;
+    covered: number;
+    partial: number;
+    not_covered: number;
+  }[];
+  uncovered_example_cards: number;
+  test_pyramid: { unit: number; api: number; ui: number };
+  first_time_right: {
+    agent_key: string;
+    agent_name: string;
+    accepted: number;
+    first_time_right_rate: number;
+  }[];
+  flake_index: {
+    total: number;
+    quarantined: number;
+    expired_quarantines: number;
+    high_score: number;
+  };
+}
+
+export interface Worklist {
+  story_id: string;
+  generated_at: string;
+  items: {
+    agent_key: string;
+    agent_name: string;
+    phase: string;
+    severity: string;
+    title: string;
+    detail: string;
+    run_status: string;
+  }[];
+  counts: Record<string, number>;
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

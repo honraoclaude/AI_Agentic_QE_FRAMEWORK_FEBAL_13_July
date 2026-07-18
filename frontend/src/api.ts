@@ -9,9 +9,14 @@ import type {
   FlakyLedger,
   FlakySig,
   Gate,
+  FlowReport,
+  MiPack,
   OpHealth,
   PipelineView,
   PushItem,
+  QualityReport,
+  ReleaseSummary,
+  Worklist,
   ReplayReport,
   RiskEntry,
   RiskRegisterData,
@@ -68,6 +73,18 @@ export const api = {
     post<RiskEntry>(`/risk-register/${id}/review`, { actor, note }),
   closeRisk: (id: string, actor: string, note: string) =>
     post<RiskEntry>(`/risk-register/${id}/close`, { actor, note }),
+
+  releases: () => request<ReleaseSummary[]>("/reports/releases"),
+  createRelease: (actor: string, name: string, target_date: string, story_ids: string[]) =>
+    post<{ id: string; name: string }>("/reports/releases", { actor, name, target_date, story_ids }),
+  setReleaseStories: (id: string, actor: string, story_ids: string[]) =>
+    post<{ id: string }>(`/reports/releases/${id}/stories`, { actor, story_ids }),
+  miPreview: (id: string) => request<MiPack>(`/reports/releases/${id}/mi-preview`),
+  sealMi: (id: string, actor: string) =>
+    post<{ snapshot_id: string; payload_hash: string }>(`/reports/releases/${id}/seal-mi`, { actor }),
+  flowReport: () => request<FlowReport>("/reports/flow"),
+  qualityReport: () => request<QualityReport>("/reports/quality"),
+  worklist: (storyId: string) => request<Worklist>(`/reports/worklist/${storyId}`),
 
   flakyTests: () => request<FlakyLedger>("/insights/flaky-tests"),
   quarantineFlaky: (id: string, actor: string, owner: string, expiry_days: number, note: string) =>
