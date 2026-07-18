@@ -390,14 +390,26 @@ async def request_rerun(
     if not guidance or not guidance.strip():
         raise WorkflowError("re-run guidance is required")
     run = await _get_run(session, run_id)
-    if run.status not in (RunStatus.COMPLETED, RunStatus.REJECTED, RunStatus.FAILED):
+    if run.status not in (
+        RunStatus.COMPLETED,
+        RunStatus.REJECTED,
+        RunStatus.FAILED,
+        RunStatus.ACCEPTED,
+    ):
         raise WorkflowError(
-            f"run is {run.status.value}; re-run requires COMPLETED, REJECTED or FAILED"
+            f"run is {run.status.value}; re-run requires COMPLETED, ACCEPTED, "
+            "REJECTED or FAILED"
         )
     if run.status == RunStatus.COMPLETED:
         run.status = RunStatus.RERUN_REQUESTED
         run.decided_by = actor.strip()
         run.decided_at = utcnow()
+    # An ACCEPTED run keeps its status — the acceptance is immutable history.
+    # The new attempt supersedes it as "latest", which un-readies the gate
+    # until the new attempt is itself accepted. This is the recovery path
+    # after a gate REJECTION: re-run the offending agent with the reviewer's
+    # rationale as guidance, re-accept, and the gate returns to
+    # READY_FOR_SIGNOFF automatically.
 
     child = AgentRun(
         story_id=run.story_id,

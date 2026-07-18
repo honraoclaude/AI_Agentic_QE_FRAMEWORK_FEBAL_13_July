@@ -1731,6 +1731,12 @@ export function RunCard({
                     ↗ Post BDD scenarios to Jira…
                   </Button>
                 )}
+                <Button
+                  title="Supersede this accepted output with a new attempt — the recovery path after a gate rejection. The acceptance stays in history; the gate re-readies once the new attempt is accepted."
+                  onClick={guard(() => setModal("rerun"))}
+                >
+                  ↻ Re-run with guidance…
+                </Button>
               </>
             )}
           </div>
