@@ -307,6 +307,36 @@ export interface ChallengeReport {
   note: string;
 }
 
+export interface PipelineNode {
+  key: string;
+  name: string;
+  phase: Phase;
+  sequence: number;
+  blocking_capable: boolean;
+  status: RunStatus | null;
+  attempt: number;
+  run_id: string | null;
+  verdict: string | null;
+  confidence: string | null;
+  release_blocking: boolean;
+}
+
+export interface PipelineEdge {
+  source: string;
+  target: string;
+  kind: "upstream" | "artifact";
+}
+
+export interface PipelineView {
+  story_id: string;
+  jira_key: string;
+  current_phase: Phase;
+  nodes: PipelineNode[];
+  edges: PipelineEdge[];
+  sources: { id: string; kinds: string[] }[];
+  gates: Record<string, { id: string; status: GateStatus }>;
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

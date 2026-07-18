@@ -1,0 +1,319 @@
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api";
+import type { PipelineView, RunStatus } from "../types";
+import { PHASES } from "../types";
+
+/** Pipeline DAG — the story's agent graph, drawn as plain SVG (no library).
+ *  Columns = phases (plus CI/CD sources on the left when artifacts exist),
+ *  rows = agent sequence, edges = AGENT_UPSTREAM_INPUTS chaining + artifact
+ *  feeds, vertical bars = the four HITL gates. Click a node to jump to its
+ *  run. Layout is deterministic — a governed pipeline, not a free canvas. */
+
+const NODE_W = 190;
+const NODE_H = 40;
+const ROW_GAP = 12;
+const COL_GAP = 70;
+const COL_W = NODE_W + COL_GAP;
+const TOP = 46;
+const SRC_W = 120;
+
+const STATUS_META: Record<string, { cls: string; label: string }> = {
+  ACCEPTED: { cls: "text-ok", label: "accepted" },
+  COMPLETED: { cls: "text-warn", label: "awaiting decision" },
+  RUNNING: { cls: "text-accent", label: "running" },
+  AWAITING_APPROVAL: { cls: "text-accent", label: "awaiting approval" },
+  PROPOSED: { cls: "text-ink-faint", label: "proposed" },
+  REJECTED: { cls: "text-bad", label: "rejected" },
+  FAILED: { cls: "text-bad", label: "failed" },
+  RERUN_REQUESTED: { cls: "text-warn", label: "re-run requested" },
+  SKIPPED: { cls: "text-ink-faint", label: "skipped" },
+};
+
+const GATE_MARK: Record<string, string> = {
+  SIGNED_OFF: "✒",
+  READY_FOR_SIGNOFF: "◇",
+  REJECTED: "✗",
+  LOCKED: "🔒",
+};
+
+function statusMeta(status: RunStatus | null) {
+  return status ? (STATUS_META[status] ?? STATUS_META.PROPOSED) : STATUS_META.PROPOSED;
+}
+
+function trunc(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+export function PipelineGraph({
+  storyId,
+  onSelectAgent,
+}: {
+  storyId: string;
+  onSelectAgent: (agentKey: string) => void;
+}) {
+  const q = useQuery({
+    queryKey: ["pipeline", storyId],
+    queryFn: () => api.pipeline(storyId),
+  });
+  const data = q.data;
+  if (!data) {
+    return <div className="p-4 text-sm text-ink-faint">Loading pipeline…</div>;
+  }
+  return <Graph data={data} onSelectAgent={onSelectAgent} />;
+}
+
+function Graph({
+  data,
+  onSelectAgent,
+}: {
+  data: PipelineView;
+  onSelectAgent: (agentKey: string) => void;
+}) {
+  const hasSources = data.sources.length > 0;
+  const left = hasSources ? SRC_W + COL_GAP : 0;
+
+  // Position every node: column by phase, row by order-within-phase.
+  const pos = new Map<string, { x: number; y: number }>();
+  let maxRows = 0;
+  for (const [ci, phase] of PHASES.entries()) {
+    const col = data.nodes
+      .filter((n) => n.phase === phase)
+      .sort((a, b) => a.sequence - b.sequence);
+    maxRows = Math.max(maxRows, col.length);
+    col.forEach((n, ri) => {
+      pos.set(n.key, { x: left + ci * COL_W, y: TOP + ri * (NODE_H + ROW_GAP) });
+    });
+  }
+  data.sources.forEach((s, i) => {
+    pos.set(`src:${s.id}`, { x: 0, y: TOP + i * (NODE_H + ROW_GAP) });
+  });
+
+  const width = left + PHASES.length * COL_W - COL_GAP + 10;
+  const height = TOP + maxRows * (NODE_H + ROW_GAP) + 16;
+  const nodeByKey = new Map(data.nodes.map((n) => [n.key, n]));
+
+  const edgePath = (from: string, to: string): string | null => {
+    const a = pos.get(from);
+    const b = pos.get(to);
+    if (!a || !b) return null;
+    if (a.x === b.x) {
+      // Same column: bulge out to the left of the column.
+      const x = a.x;
+      const y1 = a.y + NODE_H / 2;
+      const y2 = b.y + NODE_H / 2;
+      const bulge = x - 26;
+      return `M ${x} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x} ${y2}`;
+    }
+    // Cross-column: right edge of source -> left edge of target.
+    const x1 = a.x + (from.startsWith("src:") ? SRC_W : NODE_W);
+    const y1 = a.y + NODE_H / 2;
+    const x2 = b.x;
+    const y2 = b.y + NODE_H / 2;
+    const mid = (x1 + x2) / 2;
+    return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+  };
+
+  return (
+    <div className="overflow-auto rounded-lg border border-line bg-bg/40 p-2">
+      <svg width={width} height={height} className="block">
+        {/* Phase headers + gate bars between columns */}
+        {PHASES.map((phase, ci) => {
+          const x = left + ci * COL_W;
+          const gate = data.gates[phase];
+          const gateX = x + NODE_W + COL_GAP / 2;
+          return (
+            <g key={phase}>
+              <text
+                x={x + NODE_W / 2}
+                y={18}
+                textAnchor="middle"
+                className={`fill-current text-[10px] font-bold uppercase tracking-widest ${
+                  phase === data.current_phase ? "text-accent" : "text-ink-faint"
+                }`}
+              >
+                {phase}
+              </text>
+              {ci < PHASES.length - 1 && (
+                <g
+                  className={
+                    gate?.status === "SIGNED_OFF"
+                      ? "text-ok"
+                      : gate?.status === "READY_FOR_SIGNOFF"
+                        ? "text-warn"
+                        : gate?.status === "REJECTED"
+                          ? "text-bad"
+                          : "text-ink-faint"
+                  }
+                >
+                  <line
+                    x1={gateX}
+                    y1={TOP - 8}
+                    x2={gateX}
+                    y2={height - 8}
+                    className="stroke-current opacity-40"
+                    strokeDasharray="4 4"
+                  />
+                  <text
+                    x={gateX}
+                    y={height - 14}
+                    textAnchor="middle"
+                    className="fill-current text-[10px]"
+                  >
+                    {GATE_MARK[gate?.status ?? "LOCKED"] ?? "🔒"} G{ci + 1}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
+        {hasSources && (
+          <text
+            x={SRC_W / 2}
+            y={18}
+            textAnchor="middle"
+            className="fill-current text-[10px] font-bold uppercase tracking-widest text-ink-faint"
+          >
+            CI/CD
+          </text>
+        )}
+
+        {/* Edges under nodes */}
+        {data.edges.map((e, i) => {
+          const d = edgePath(e.source, e.target);
+          if (!d) return null;
+          const srcAccepted =
+            nodeByKey.get(e.source)?.status === "ACCEPTED" ||
+            e.source.startsWith("src:");
+          return (
+            <path
+              key={i}
+              d={d}
+              fill="none"
+              className={
+                e.kind === "artifact"
+                  ? "stroke-current text-review opacity-50"
+                  : srcAccepted
+                    ? "stroke-current text-accent opacity-60"
+                    : "stroke-current text-ink-faint opacity-30"
+              }
+              strokeWidth={e.kind === "artifact" ? 1 : 1.4}
+              strokeDasharray={e.kind === "artifact" ? "3 3" : undefined}
+            />
+          );
+        })}
+
+        {/* Source nodes */}
+        {data.sources.map((s) => {
+          const p = pos.get(`src:${s.id}`)!;
+          return (
+            <g key={s.id} className="text-review">
+              <rect
+                x={p.x}
+                y={p.y}
+                width={SRC_W}
+                height={NODE_H}
+                rx={6}
+                className="fill-panel stroke-current opacity-90"
+              />
+              <text
+                x={p.x + SRC_W / 2}
+                y={p.y + 17}
+                textAnchor="middle"
+                className="fill-current text-[10px] font-semibold"
+              >
+                {s.id}
+              </text>
+              <text
+                x={p.x + SRC_W / 2}
+                y={p.y + 30}
+                textAnchor="middle"
+                className="fill-current text-[8px] opacity-70"
+              >
+                {trunc(s.kinds.join(" · "), 22)}
+              </text>
+              <title>
+                {s.id} artifacts: {s.kinds.join(", ")}
+              </title>
+            </g>
+          );
+        })}
+
+        {/* Agent nodes */}
+        {data.nodes.map((n) => {
+          const p = pos.get(n.key)!;
+          const meta = statusMeta(n.status);
+          return (
+            <g
+              key={n.key}
+              className="cursor-pointer"
+              onClick={() => onSelectAgent(n.key)}
+            >
+              <rect
+                x={p.x}
+                y={p.y}
+                width={NODE_W}
+                height={NODE_H}
+                rx={6}
+                className={`fill-panel stroke-current ${
+                  n.release_blocking ? "text-bad" : "text-line"
+                }`}
+                strokeWidth={n.release_blocking ? 1.6 : 1}
+              />
+              <circle
+                cx={p.x + 12}
+                cy={p.y + NODE_H / 2}
+                r={4}
+                className={`fill-current ${meta.cls}`}
+              />
+              <text
+                x={p.x + 24}
+                y={p.y + 17}
+                className="fill-current text-[10px] font-medium text-ink"
+              >
+                {trunc(n.name.replace(/ Agent$/, ""), 27)}
+              </text>
+              <text
+                x={p.x + 24}
+                y={p.y + 30}
+                className={`fill-current text-[9px] ${meta.cls}`}
+              >
+                {meta.label}
+                {n.verdict ? ` · ${n.verdict}` : ""}
+                {n.attempt > 1 ? ` · #${n.attempt}` : ""}
+              </text>
+              {n.blocking_capable && (
+                <text
+                  x={p.x + NODE_W - 10}
+                  y={p.y + 15}
+                  textAnchor="end"
+                  className="fill-current text-[9px] text-bad"
+                >
+                  ⛔
+                </text>
+              )}
+              <title>
+                {n.name}
+                {"\n"}status: {meta.label}
+                {n.verdict ? `\nverdict: ${n.verdict}` : ""}
+                {n.confidence ? `\nconfidence: ${n.confidence}` : ""}
+                {n.blocking_capable ? "\nblocking-capable (no override)" : ""}
+                {"\nclick to open the run"}
+              </title>
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[9px] text-ink-faint">
+        <span><span className="text-ok">●</span> accepted</span>
+        <span><span className="text-warn">●</span> awaiting decision</span>
+        <span><span className="text-accent">●</span> awaiting approval</span>
+        <span><span className="text-bad">●</span> rejected / failed</span>
+        <span>● proposed / skipped</span>
+        <span className="text-accent">— chained input (accepted flows)</span>
+        <span className="text-review">┄ artifact feed</span>
+        <span>⛔ blocking-capable</span>
+      </div>
+    </div>
+  );
+}

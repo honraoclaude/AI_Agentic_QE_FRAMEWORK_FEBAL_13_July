@@ -12,9 +12,10 @@ import {
 } from "../ui";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { GateModal } from "./GateModal";
+import { PipelineGraph } from "./PipelineGraph";
 import { RunCard } from "./RunCard";
 
-type DrawerTab = "runs" | "gates" | "artifacts" | "timeline" | "details";
+type DrawerTab = "runs" | "pipeline" | "gates" | "artifacts" | "timeline" | "details";
 
 const PHASE_SHORT: Record<Phase, string> = {
   REFINEMENT: "Refinement",
@@ -141,6 +142,7 @@ export function StoryDrawer({
 }) {
   const [tab, setTab] = useState<DrawerTab>(initialTab);
   const [gateModal, setGateModal] = useState<Gate | null>(null);
+  const [pendingAgent, setPendingAgent] = useState<string | null>(null);
   const autoOpenedRef = useRef(false);
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -171,6 +173,19 @@ export function StoryDrawer({
   });
 
   const story = storyQuery.data;
+
+  // Pipeline-graph click-through: switch to the runs tab, then scroll to the
+  // selected agent's run card once it has rendered.
+  useEffect(() => {
+    if (tab !== "runs" || !pendingAgent) return;
+    const key = pendingAgent;
+    setPendingAgent(null);
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`agent-${key}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [tab, pendingAgent]);
 
   // Deep-link from the work queue: once loaded, jump straight to the gate
   // sign-off ceremony (only the first time — don't re-open on refetch).
@@ -273,6 +288,7 @@ export function StoryDrawer({
                 {(
                   [
                     ["runs", "Agent Runs"],
+                    ["pipeline", "Pipeline"],
                     ["gates", "Gates"],
                     ["artifacts", "Artifacts"],
                     ["timeline", "Timeline"],
@@ -313,27 +329,53 @@ export function StoryDrawer({
                           {PHASE_SHORT[phase]}
                         </h3>
                         <div className="flex flex-col gap-2">
-                          {phaseAgents.flatMap((agentDef) => {
+                          {phaseAgents.map((agentDef) => {
                             const attempts = runsByAgent.get(agentDef.key) ?? [];
-                            return attempts.map((run) => (
-                              <RunCard
-                                key={run.id}
-                                run={run}
-                                parent={
-                                  run.parent_run_id
-                                    ? attempts.find((r) => r.id === run.parent_run_id) ?? null
-                                    : null
-                                }
-                                agent={agentDef}
-                                actor={actor}
-                                requireActor={requireActor}
-                              />
-                            ));
+                            if (attempts.length === 0) return null;
+                            return (
+                              <div
+                                key={agentDef.key}
+                                id={`agent-${agentDef.key}`}
+                                className="flex scroll-mt-2 flex-col gap-2"
+                              >
+                                {attempts.map((run) => (
+                                  <RunCard
+                                    key={run.id}
+                                    run={run}
+                                    parent={
+                                      run.parent_run_id
+                                        ? attempts.find((r) => r.id === run.parent_run_id) ?? null
+                                        : null
+                                    }
+                                    agent={agentDef}
+                                    actor={actor}
+                                    requireActor={requireActor}
+                                  />
+                                ))}
+                              </div>
+                            );
                           })}
                         </div>
                       </section>
                     );
                   })}
+                </div>
+              )}
+
+              {tab === "pipeline" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[11px] text-ink-dim">
+                    The story's agent pipeline: chained inputs flow left to
+                    right through the four HITL gates. Click any agent to open
+                    its run.
+                  </p>
+                  <PipelineGraph
+                    storyId={storyId}
+                    onSelectAgent={(key) => {
+                      setPendingAgent(key);
+                      setTab("runs");
+                    }}
+                  />
                 </div>
               )}
 

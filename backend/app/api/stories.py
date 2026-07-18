@@ -12,7 +12,7 @@ from ..schemas import (
     StoryBoardOut,
     StoryDetailOut,
 )
-from ..services import challenger, evidence_pack, referee
+from ..services import challenger, evidence_pack, pipeline_view, referee
 from ..services.jira import sync_service
 from ..services.jira.factory import get_adapter
 from ..services.ws import manager
@@ -93,6 +93,16 @@ async def story_health(story_id: str, session: AsyncSession = Depends(get_sessio
     if story is None:
         raise HTTPException(status_code=404, detail="story not found")
     return await referee.assess(session, story_id)
+
+
+@router.get("/{story_id}/pipeline")
+async def story_pipeline(story_id: str, session: AsyncSession = Depends(get_session)):
+    """Pipeline DAG projection: agents as nodes (with latest run status),
+    chaining + artifact-source edges, and gate statuses — ready to render."""
+    story = await session.get(Story, story_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="story not found")
+    return await pipeline_view.build(session, story)
 
 
 @router.get("/{story_id}/challenges")
