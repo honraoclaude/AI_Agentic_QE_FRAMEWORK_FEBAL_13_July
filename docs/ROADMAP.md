@@ -125,6 +125,44 @@ store. Scoped **advisory-only** (agreed):
 - 🟡 **Predictive risk radar (M)** — learn from historical run outcomes to score
   which incoming stories are likely to fail testing.
 
+### 📌 PARKED — Shadow Backtest (M) — the adoption wedge
+*Discussed 2026-07-18; parked by choice, not doubt. Run the ENTIRE pipeline
+read-only over N already-released stories — no gates, no pushes, nothing
+blockable — and compare verdicts with what actually happened.*
+
+- **Mechanics:** batch orchestration mode, not a new agent — `backtest.py`
+  looping stories × 26 agents in shadow (reuse `engine.execute`; shadow runs
+  never feed gates/upstream), then an outcome-comparison step (pipeline verdict
+  vs later hot-fixes/defects from Jira, human-confirmed), then one report in
+  the Evidence-Pack style: "on your last 30 shipped stories we'd have raised
+  4 BLOCKER financial findings and flagged 2 stories you later hot-fixed."
+- **Why it leads adoption:** zero process change to try; evidence is the
+  customer's own history (un-arguable); the hits self-select the leadership
+  demo; every agreement/disagreement is a free real-world labelled case for
+  the eval harness.
+- **Limits:** artifact availability caps the Dev/Test agents on old stories
+  (confidence caveats already handle thin input); hindsight labelling needs a
+  quick human confirm; real-path model cost is N×26 calls (demo path free).
+- **When:** the moment the framework meets a real team with real history.
+
+### 📌 PARKED — QE value-add shortlist (2026-07-18 analysis)
+*Ranked; #1 was the recommendation when discussed.*
+1. **Risk Acceptance Register / quality-debt ledger (M)** — every
+   accepted-despite decision (WARN sign-off, CONDITIONAL_GO, accept over HIGH
+   findings) becomes a register entry: what/who/rationale/severity/review-by
+   date. Register tab + Challenger cross-reference ("3rd risk of this type
+   still open") + Evidence Pack section; stale entries escalate. SYSC-style
+   risk register — sign-offs become managed positions, not terminal events.
+   ~90% of the data already persisted (decision_reason, rationale, findings).
+2. **Flaky-Test Intelligence (M)** — cross-run failure-signature ledger with
+   flake scores and a quarantine list carrying OWNER + EXPIRY (quarantine that
+   never expires is how suites rot); feeds Test Execution Analyst as upstream
+   evidence. Stateful QE memory without FCA self-tuning concerns.
+3. **Synthetic FCA-safe data generator (M)** — generate deterministic seeded
+   fixtures (households/accounts, GBP edge cases) directly from BDD example
+   cards (EX-1.3 "pending excluded" → a fixture containing exactly that);
+   makes "no real client data in testing" a generated artifact, not a policy.
+
 ## 4. Human-in-the-loop UX
 
 - 🟢 **"Ask the audit trail" (M)** — natural-language Q&A (RAG over audit events +
