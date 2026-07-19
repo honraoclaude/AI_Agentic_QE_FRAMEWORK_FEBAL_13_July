@@ -14,3 +14,7 @@ frontend/dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Local tooling
+.claude/
+frontend/tsconfig.tsbuildinfo
