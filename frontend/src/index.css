@@ -123,3 +123,74 @@ body {
     animation: none;
   }
 }
+
+/* Ruled-paper texture for the masthead — faint vertical rules, ledger-style. */
+.masthead-ledger {
+  background:
+    linear-gradient(var(--color-panel), var(--color-panel)) padding-box,
+    repeating-linear-gradient(90deg, var(--color-line) 0 1px, transparent 1px 96px);
+}
+
+/* Release Health dial — a CSS-only half-circle gauge (conic-gradient ring,
+   masked to a thin band, no hand-drawn SVG arc data). Zones are fixed
+   thresholds (0-60% crit / 60-85% warn / 85-100% good across the 180deg
+   arc); only the needle's rotation is data-driven, via --needle-angle. */
+.dial {
+  width: 132px;
+  height: 66px;
+  position: relative;
+  overflow: hidden;
+  flex: none;
+}
+.dial-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from -90deg,
+    var(--color-bad) 0deg,
+    var(--color-bad) 108deg,
+    var(--color-warn) 108deg,
+    var(--color-warn) 153deg,
+    var(--color-ok) 153deg,
+    var(--color-ok) 180deg,
+    transparent 180deg,
+    transparent 360deg
+  );
+  -webkit-mask-image: radial-gradient(closest-side, transparent 61%, transparent 61%, #000 62% 77%, transparent 78%);
+  mask-image: radial-gradient(closest-side, transparent 61%, transparent 61%, #000 62% 77%, transparent 78%);
+}
+.dial-needle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: 56px;
+  background: var(--color-ink);
+  transform-origin: bottom center;
+  transform: rotate(var(--needle-angle, -90deg));
+  border-radius: 2px;
+  animation: needle-sweep 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes needle-sweep {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(var(--needle-angle, -90deg)); }
+}
+.dial-pivot {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-ink);
+  transform: translateX(-50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dial-needle {
+    animation: none;
+  }
+}

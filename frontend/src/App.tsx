@@ -117,7 +117,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-4 border-b border-line bg-panel/80 px-5 py-3 backdrop-blur">
+      <header className="masthead-ledger flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 backdrop-blur">
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-ink-dim">
             <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-ok animate-pulse-ring" />
@@ -161,6 +161,18 @@ export default function App() {
             <Badge className="border-warn/40 bg-warn/10 text-warn">Med</Badge>
             <Badge className="border-bad/40 bg-bad/10 text-bad">High</Badge>
           </div>
+          <div className="hidden flex-col items-end 2xl:flex">
+            <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+              Session
+            </span>
+            <span className="font-mono text-[11px] text-ink">
+              {new Date().toLocaleDateString(undefined, {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })}
+            </span>
+          </div>
           {health.data?.demo_mode && (
             <span className="rounded border border-warn/40 bg-warn/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warn">
               Demo mode
@@ -181,22 +193,22 @@ export default function App() {
               onClick={() => setTheme("light")}
               aria-pressed={theme === "light"}
               title="Light theme"
-              className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
                 theme === "light" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
               }`}
             >
-              <SunIcon />
+              <SunIcon /> Light
             </button>
             <button
               type="button"
               onClick={() => setTheme("dark")}
               aria-pressed={theme === "dark"}
               title="Dark theme"
-              className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
                 theme === "dark" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
               }`}
             >
-              <MoonIcon />
+              <MoonIcon /> Dark
             </button>
           </div>
           <select

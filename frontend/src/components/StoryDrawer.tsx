@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import type { AgentDef, Gate, Phase, Run, StoryHealth } from "../types";
 import { PHASES } from "../types";
@@ -63,12 +63,26 @@ const SEV_CLS: Record<string, string> = {
 
 function HealthCard({ health }: { health: StoryHealth }) {
   const band = BAND_META[health.band] ?? BAND_META.NO_DATA;
+  const score = health.score ?? 0;
+  const needleAngle = -90 + (Math.max(0, Math.min(100, score)) / 100) * 180;
   return (
     <section className={`rounded-lg border p-3 ${band.ring}`}>
-      <div className="flex items-center gap-3">
-        <div className={`font-mono text-3xl font-bold ${band.cls}`}>{health.score}</div>
+      <div className="flex items-center gap-4">
+        <div className="flex flex-col items-center">
+          <div className="dial">
+            <div className="dial-ring" />
+            <div className="dial-needle" style={{ "--needle-angle": `${needleAngle}deg` } as CSSProperties} />
+            <div className="dial-pivot" />
+          </div>
+          <div className={`font-serif text-xl font-semibold ${band.cls}`}>
+            {score}
+            <span className="font-mono text-xs text-ink-faint">/100</span>
+          </div>
+        </div>
         <div className="flex flex-col">
-          <span className={`text-sm font-semibold ${band.cls}`}>Release Health · {band.label}</span>
+          <span className={`font-serif text-sm font-semibold italic ${band.cls}`}>
+            Release Health · {band.label}
+          </span>
           <span className="text-[10px] text-ink-faint">
             {health.agents_evaluated} agents · assurance {health.assurance ?? "—"} ·{" "}
             {health.counts.pass}✓ {health.counts.warn}▲ {health.counts.fail}✗
@@ -274,7 +288,7 @@ export function StoryDrawer({
                   </Button>
                 </div>
               </div>
-              <h1 className="mt-2 text-sm font-medium leading-snug text-ink">
+              <h1 className="mt-2 font-serif text-base italic leading-snug text-ink">
                 {story.summary}
               </h1>
               {story.changed_since_agent_run && (
@@ -486,7 +500,7 @@ export function StoryDrawer({
                     <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
                       Description
                     </h4>
-                    <p className="whitespace-pre-wrap leading-relaxed text-ink">
+                    <p className="whitespace-pre-wrap font-serif italic leading-relaxed text-ink">
                       {story.description ?? "—"}
                     </p>
                   </div>
@@ -495,11 +509,16 @@ export function StoryDrawer({
                       Acceptance criteria
                     </h4>
                     {story.acceptance_criteria.length ? (
-                      <ul className="list-inside list-disc space-y-1 text-ink">
+                      <ol className="flex flex-col gap-1.5 text-ink">
                         {story.acceptance_criteria.map((ac, i) => (
-                          <li key={i}>{ac}</li>
+                          <li key={i} className="flex gap-2">
+                            <span className="font-mono text-[10px] text-accent">
+                              AC-{i + 1}
+                            </span>
+                            <span>{ac}</span>
+                          </li>
                         ))}
-                      </ul>
+                      </ol>
                     ) : (
                       <p className="text-ink-faint">None captured.</p>
                     )}
