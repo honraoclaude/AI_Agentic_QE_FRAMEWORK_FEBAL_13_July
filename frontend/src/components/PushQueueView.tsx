@@ -2,14 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { PushItem, PushStatus } from "../types";
-import { Badge, Button, fmtTime, Modal, useToast } from "../ui";
+import { Button, fmtTime, Modal, useToast } from "../ui";
 
-const STATUS_META: Record<PushStatus, string> = {
-  DRAFT: "border-line text-ink-dim",
-  APPROVED: "border-accent/50 text-accent",
-  SENT: "border-ok/50 text-ok bg-ok/10",
-  FAILED: "border-bad/50 text-bad bg-bad/10",
-  RETRYING: "border-warn/50 text-warn",
+const STATUS_PILL: Record<PushStatus, string> = {
+  DRAFT: "pill-slate",
+  APPROVED: "pill-accent",
+  SENT: "pill-good",
+  FAILED: "pill-crit",
+  RETRYING: "pill-warn",
 };
 
 export function PushQueueView({ actor }: { actor: string }) {
@@ -33,51 +33,57 @@ export function PushQueueView({ actor }: { actor: string }) {
   const items = pushQuery.data ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl p-5">
-      <p className="mb-4 text-[11px] leading-relaxed text-ink-faint">
+    <div className="stage">
+      <div className="board-head">
+        <div className="board-title">Jira Push Queue</div>
+        <div className="board-sub">Outbound sync between QE gate decisions and Jira issue state</div>
+      </div>
+      <p className="queue-note">
         Every outbound Jira post lives here: drafts await your approval (with a
         preview of exactly what will be posted), failures keep their error and can
         be retried — approved posts are never lost.
       </p>
       <div className="flex flex-col gap-2">
         {items.map((item) => (
-          <div
-            key={item.id}
-            className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-2.5 text-xs"
-          >
-            <Badge className={STATUS_META[item.status]}>{item.status}</Badge>
-            <Badge className="border-line text-ink-dim">{item.push_type}</Badge>
-            <span className="font-mono text-accent">{String(item.payload.jira_key ?? "")}</span>
-            <span className="truncate text-ink-dim">
-              {String(item.payload.kind ?? "").replaceAll("_", " ")}
-            </span>
-            <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
-              {item.attempts > 0 && `${item.attempts} attempt${item.attempts > 1 ? "s" : ""} · `}
-              {fmtTime(item.updated_at)}
-            </span>
-            {item.payload.preview_text != null && (
-              <Button variant="ghost" onClick={() => setPreview(item)}>
-                Preview
-              </Button>
-            )}
-            {item.status === "DRAFT" && (
-              <Button
-                variant="primary"
-                busy={action.isPending}
-                onClick={() => action.mutate({ id: item.id, kind: "approve" })}
-              >
-                Approve &amp; send
-              </Button>
-            )}
-            {item.status === "FAILED" && (
-              <Button
-                variant="danger"
-                busy={action.isPending}
-                onClick={() => action.mutate({ id: item.id, kind: "retry" })}
-              >
-                Retry
-              </Button>
-            )}
+          <div key={item.id} className="panel-block" style={{ marginBottom: 0, padding: "12px 16px" }}>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className={`pill ${STATUS_PILL[item.status]}`}>{item.status}</span>
+              <span className="chip">{item.push_type}</span>
+              <span className="card-id">{String(item.payload.jira_key ?? "")}</span>
+              <span className="truncate font-mono text-[11px] text-ink-dim">
+                {String(item.payload.kind ?? "").replaceAll("_", " ")}
+              </span>
+              <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
+                {item.attempts > 0 && `${item.attempts} attempt${item.attempts > 1 ? "s" : ""} · `}
+                {fmtTime(item.updated_at)}
+              </span>
+              {item.payload.preview_text != null && (
+                <button type="button" className="ghost-btn" onClick={() => setPreview(item)}>
+                  Preview
+                </button>
+              )}
+              {item.status === "DRAFT" && (
+                <button
+                  type="button"
+                  className="sync-btn"
+                  disabled={action.isPending}
+                  onClick={() => action.mutate({ id: item.id, kind: "approve" })}
+                >
+                  Approve &amp; send
+                </button>
+              )}
+              {item.status === "FAILED" && (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  style={{ borderColor: "var(--color-bad)", color: "var(--color-bad)" }}
+                  disabled={action.isPending}
+                  onClick={() => action.mutate({ id: item.id, kind: "retry" })}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
           </div>
         ))}
         {items.length === 0 && !pushQuery.isLoading && (
@@ -102,13 +108,14 @@ export function PushQueueView({ actor }: { actor: string }) {
               Close
             </Button>
             {preview.status === "DRAFT" && (
-              <Button
-                variant="primary"
-                busy={action.isPending}
+              <button
+                type="button"
+                className="sync-btn"
+                disabled={action.isPending}
                 onClick={() => action.mutate({ id: preview.id, kind: "approve" })}
               >
                 Approve &amp; send to Jira
-              </Button>
+              </button>
             )}
           </div>
         </Modal>

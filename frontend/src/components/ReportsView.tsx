@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { MiPack, ReleaseSummary } from "../types";
-import { Badge, Button, useToast } from "../ui";
+import { useToast } from "../ui";
 
 /** Stakeholder reporting — a report serves one decision, not one audience.
  *  Exec MI (per release, SEALED + hash-chained) · Flow (PM/PO, live) ·
@@ -16,8 +16,12 @@ const pct = (v: number | null | undefined) =>
 export function ReportsView({ actor }: { actor: string }) {
   const [sub, setSub] = useState<SubTab>("exec");
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-4 flex gap-1">
+    <div className="stage">
+      <div className="board-head">
+        <div className="board-title">Reports</div>
+        <div className="board-sub">Generated automatically at each gate &middot; signed and retained for FCA evidence</div>
+      </div>
+      <div className="navlinks" style={{ marginBottom: 16 }}>
         {(
           [
             ["exec", "Exec MI (per release)"],
@@ -26,13 +30,7 @@ export function ReportsView({ actor }: { actor: string }) {
             ["worklist", "Worklist (Dev)"],
           ] as [SubTab, string][]
         ).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setSub(id)}
-            className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-              sub === id ? "bg-accent/15 text-accent" : "text-ink-dim hover:bg-panel-2"
-            }`}
-          >
+          <button key={id} type="button" onClick={() => setSub(id)} className={sub === id ? "active" : ""}>
             {label}
           </button>
         ))}
@@ -81,57 +79,57 @@ function ExecMi({ actor }: { actor: string }) {
 
   return (
     <div>
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Executive MI — per release, sealed</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Board-ready Consumer-Duty-style MI. A sealed pack is immutable: its canonical
         hash enters the append-only audit chain, so "the numbers the board saw" stay
         reproducible. Live previews are clearly unsealed.
       </p>
 
-      {/* Create release */}
-      <div className="mb-5 rounded-lg border border-line bg-panel p-3">
-        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-          New release
-        </h3>
+      <div className="panel-block">
+        <div className="section-label">New release</div>
         <div className="mb-2 flex flex-wrap gap-2">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder='Name, e.g. "Release 26.8"'
-            className="w-56 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+            className="role-select"
+            style={{ width: 220 }}
           />
           <input
             value={date}
             onChange={(e) => setDate(e.target.value)}
             placeholder="Target date (YYYY-MM-DD)"
-            className="w-44 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+            className="role-select"
+            style={{ width: 170 }}
           />
-          <Button
-            variant="primary"
-            disabled={!name.trim() || selected.size === 0}
-            busy={create.isPending}
+          <button
+            type="button"
+            className="sync-btn"
+            disabled={!name.trim() || selected.size === 0 || create.isPending}
             onClick={() => {
               if (!actor.trim()) { toast("error", "Enter your name in the header first."); return; }
               create.mutate();
             }}
           >
             Create with {selected.size} story(ies)
-          </Button>
+          </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {stories.map((s) => (
             <button
               key={s.id}
+              type="button"
               onClick={() => {
                 const next = new Set(selected);
                 if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
                 setSelected(next);
               }}
-              className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+              className="chip"
+              style={
                 selected.has(s.id)
-                  ? "border-accent/60 bg-accent/15 text-accent"
-                  : "border-line text-ink-dim hover:bg-panel-2"
-              }`}
+                  ? { color: "var(--color-accent)", borderColor: "var(--color-accent)", background: "var(--accent-soft)" }
+                  : undefined
+              }
             >
               {s.jira_key}
             </button>
@@ -139,50 +137,52 @@ function ExecMi({ actor }: { actor: string }) {
         </div>
       </div>
 
-      {/* Releases + snapshots */}
       {releases.length === 0 ? (
-        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+        <div className="panel-block text-center text-sm text-ink-faint">
           No releases yet — create one above to generate its MI pack.
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           {releases.map((r: ReleaseSummary) => (
-            <div key={r.id} className="rounded-lg border border-line bg-panel p-3">
+            <div key={r.id} className="panel-block" style={{ marginBottom: 0 }}>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-ink">{r.name}</span>
+                <span className="text-[13px] font-semibold text-ink">{r.name}</span>
                 {r.target_date && (
                   <span className="font-mono text-[10px] text-ink-faint">→ {r.target_date}</span>
                 )}
-                <Badge className="border-line text-ink-dim">{r.story_ids.length} stories</Badge>
+                <span className="chip">{r.story_ids.length} stories</span>
                 <div className="ml-auto flex gap-2">
-                  <Button
+                  <button
+                    type="button"
+                    className="ghost-btn"
                     onClick={async () => {
                       try { setPreview(await api.miPreview(r.id)); }
                       catch (e) { toast("error", (e as Error).message); }
                     }}
                   >
-                    👁 Live preview
-                  </Button>
-                  <Button
-                    variant="primary"
-                    busy={seal.isPending}
+                    Live preview
+                  </button>
+                  <button
+                    type="button"
+                    className="sync-btn"
+                    disabled={seal.isPending}
                     onClick={() => {
                       if (!actor.trim()) { toast("error", "Enter your name in the header first."); return; }
                       seal.mutate(r.id);
                     }}
                   >
-                    ✒ Seal MI pack
-                  </Button>
+                    &#9990; Seal MI pack
+                  </button>
                 </div>
               </div>
               {r.snapshots.length > 0 && (
                 <div className="mt-2 flex flex-col gap-1">
                   {r.snapshots.map((s) => (
-                    <div key={s.id} className="flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="text-ok">✒ sealed</span>
+                    <div key={s.id} className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                      <span style={{ color: "var(--color-ok)" }}>&#9990; sealed</span>
                       <span className="text-ink-dim">{(s.created_at ?? "").slice(0, 16).replace("T", " ")}</span>
                       <span className="text-ink-faint">by {s.generated_by}</span>
-                      <span className="font-mono text-[10px] text-ink-faint">#{s.payload_hash.slice(0, 12)}</span>
+                      <span className="text-[10px] text-ink-faint">#{s.payload_hash.slice(0, 12)}</span>
                       <button
                         className="text-accent hover:underline"
                         onClick={() => window.open(`/api/v1/reports/mi/${s.id}`, "_blank")}
@@ -206,52 +206,52 @@ function ExecMi({ actor }: { actor: string }) {
 function MiPreview({ pack, onClose }: { pack: MiPack; onClose: () => void }) {
   const ci = pack.confidence_index;
   return (
-    <div className="mt-4 rounded-lg border border-warn/40 bg-warn/5 p-3">
+    <div className="referee" style={{ marginTop: 16, borderColor: "var(--warn-soft)" }}>
       <div className="mb-2 flex items-center gap-2">
-        <Badge className="border-warn/50 bg-warn/10 text-warn">UNSEALED PREVIEW</Badge>
-        <span className="text-xs font-semibold text-ink">{pack.release.name}</span>
-        <span className="text-[10px] text-ink-faint">numbers may still move — seal to freeze</span>
-        <Button variant="ghost" onClick={onClose}>✕</Button>
+        <span className="pill pill-warn">Unsealed preview</span>
+        <span className="text-[13px] font-semibold text-ink">{pack.release.name}</span>
+        <span className="font-mono text-[10px] text-ink-faint">numbers may still move — seal to freeze</span>
+        <button type="button" className="ghost-btn ml-auto" onClick={onClose}>&#10005;</button>
       </div>
-      <div className="grid grid-cols-4 gap-3">
+      <div className="kpi-row" style={{ marginBottom: 12 }}>
         {[
           ["Confidence index", ci === null ? "—" : String(ci),
-           ci !== null && ci >= 80 ? "text-ok" : ci !== null && ci >= 55 ? "text-warn" : "text-bad"],
+           ci !== null && ci >= 80 ? "var(--color-ok)" : ci !== null && ci >= 55 ? "var(--color-warn)" : "var(--color-bad)"],
           ["Open risks (overdue)", `${pack.quality_debt.open} (${pack.quality_debt.overdue})`,
-           pack.quality_debt.overdue ? "text-bad" : "text-ink"],
+           pack.quality_debt.overdue ? "var(--color-bad)" : undefined],
           ["FCA scenarios unexecuted", String(pack.regulatory_evidence.fca_scenarios_unexecuted),
-           pack.regulatory_evidence.fca_scenarios_unexecuted ? "text-bad" : "text-ok"],
-          ["Runs human-decided", pct(pack.ai_governance.human_decided_pct), "text-ink"],
-        ].map(([label, val, cls]) => (
-          <div key={label as string} className="rounded border border-line bg-panel p-2">
-            <div className={`text-base font-bold ${cls}`}>{val}</div>
-            <div className="text-[9px] uppercase tracking-wider text-ink-faint">{label}</div>
+           pack.regulatory_evidence.fca_scenarios_unexecuted ? "var(--color-bad)" : "var(--color-ok)"],
+          ["Runs human-decided", pct(pack.ai_governance.human_decided_pct), undefined],
+        ].map(([label, val, color]) => (
+          <div key={label as string} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 20, color: color as string | undefined }}>{val}</div>
           </div>
         ))}
       </div>
-      <table className="mt-3 w-full text-left text-[11px]">
-        <thead>
-          <tr className="border-b border-line text-[10px] uppercase text-ink-faint">
-            <th className="py-1 pr-2">Story</th><th className="py-1 pr-2">Phase</th>
-            <th className="py-1 pr-2">Health</th><th className="py-1 pr-2">Blockers</th>
-            <th className="py-1">Released</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pack.stories.map((s) => (
-            <tr key={s.jira_key} className="border-b border-line/50">
-              <td className="py-1 pr-2 font-mono text-accent">{s.jira_key}</td>
-              <td className="py-1 pr-2">{s.phase}</td>
-              <td className={`py-1 pr-2 ${s.band === "HEALTHY" ? "text-ok" : s.band === "AT_RISK" ? "text-warn" : s.band === "NO_DATA" ? "text-ink-faint" : "text-bad"}`}>
-                {s.score ?? "—"} · {s.band}
-              </td>
-              <td className="py-1 pr-2">{s.blockers}</td>
-              <td className="py-1">{s.released ? "Yes" : "No"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-2 text-[10px] text-ink-faint">
+      <div className="dtable" style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%" }}>
+          <thead>
+            <tr><th>Story</th><th>Phase</th><th>Health</th><th>Blockers</th><th>Released</th></tr>
+          </thead>
+          <tbody>
+            {pack.stories.map((s) => (
+              <tr key={s.jira_key}>
+                <td className="idcell">{s.jira_key}</td>
+                <td>{s.phase}</td>
+                <td style={{
+                  color: s.band === "HEALTHY" ? "var(--color-ok)" : s.band === "AT_RISK" ? "var(--color-warn)" : s.band === "NO_DATA" ? "var(--color-ink-faint)" : "var(--color-bad)",
+                }}>
+                  {s.score ?? "—"} · {s.band}
+                </td>
+                <td>{s.blockers}</td>
+                <td>{s.released ? "Yes" : "No"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 font-mono text-[10px] text-ink-faint">
         Lead time {pack.flow.avg_lead_time_days ?? "—"}d · rework rate {pct(pack.flow.rework_story_rate)} ·
         override rate {pct(pack.ai_governance.override_rate)} · first-time-right {pct(pack.ai_governance.first_time_right_rate)}
       </div>
@@ -267,27 +267,26 @@ function FlowView() {
   if (!d) return <div className="text-sm text-ink-faint">Loading…</div>;
   return (
     <div>
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Flow — where is work stuck?</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Live. Gate cycle times, the human-in-the-loop queue, and blocking questions aging.
       </p>
-      <div className="mb-4 grid grid-cols-3 gap-3">
+      <div className="kpi-row">
         {[
           ["HITL queue depth", String(d.hitl_queue.depth)],
           ["Avg decision latency", d.hitl_queue.avg_decision_latency_days === null ? "—" : `${d.hitl_queue.avg_decision_latency_days}d`],
           ["Blocking questions open", String(d.blocking_questions.length)],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className="text-lg font-bold text-ink">{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{val}</div>
           </div>
         ))}
       </div>
 
       {d.gate_cycle_times.length > 0 && (
-        <div className="mb-4 rounded-lg border border-line bg-panel p-3">
-          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">Gate cycle time</h3>
-          <div className="flex gap-4 text-[11px] text-ink">
+        <div className="panel-block">
+          <div className="section-label">Gate cycle time</div>
+          <div className="flex gap-4 text-[12px] text-ink">
             {d.gate_cycle_times.map((g) => (
               <span key={g.phase}>{g.phase}: <b>{g.avg_days}d</b> ({g.gates})</span>
             ))}
@@ -295,28 +294,26 @@ function FlowView() {
         </div>
       )}
 
-      <div className="mb-4 rounded-lg border border-line bg-panel p-3">
-        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-          Waiting on a human (oldest first)
-        </h3>
+      <div className="panel-block">
+        <div className="section-label">Waiting on a human (oldest first)</div>
         {d.hitl_queue.runs.length === 0 && d.hitl_queue.gates_ready.length === 0 ? (
           <div className="text-[11px] text-ink-faint">Queue clear.</div>
         ) : (
-          <div className="flex flex-col gap-1 text-[11px]">
+          <div className="flex flex-col gap-1.5">
             {d.hitl_queue.gates_ready.map((g, i) => (
-              <div key={`g${i}`} className="flex gap-2">
-                <Badge className="border-review/40 text-review">GATE</Badge>
-                <span className="font-mono text-accent">{g.jira_key}</span>
-                <span className="text-ink">{g.phase} sign-off ready</span>
-                <span className={`ml-auto font-mono text-[10px] ${g.age_days > 2 ? "text-bad" : "text-ink-faint"}`}>{g.age_days}d</span>
+              <div key={`g${i}`} className="flex items-center gap-2">
+                <span className="pill" style={{ color: "var(--color-review)", borderColor: "var(--color-review)" }}>Gate</span>
+                <span className="card-id">{g.jira_key}</span>
+                <span className="text-[12px] text-ink">{g.phase} sign-off ready</span>
+                <span className="ml-auto font-mono text-[10px]" style={{ color: g.age_days > 2 ? "var(--color-bad)" : "var(--color-ink-faint)" }}>{g.age_days}d</span>
               </div>
             ))}
             {d.hitl_queue.runs.map((r, i) => (
-              <div key={i} className="flex gap-2">
-                <Badge className="border-line text-ink-dim">{r.kind === "RUN_APPROVAL" ? "APPROVE" : "DECIDE"}</Badge>
-                <span className="font-mono text-accent">{r.jira_key}</span>
-                <span className="text-ink">{r.agent}</span>
-                <span className={`ml-auto font-mono text-[10px] ${r.age_days > 2 ? "text-bad" : "text-ink-faint"}`}>{r.age_days}d</span>
+              <div key={i} className="flex items-center gap-2">
+                <span className="pill pill-slate">{r.kind === "RUN_APPROVAL" ? "Approve" : "Decide"}</span>
+                <span className="card-id">{r.jira_key}</span>
+                <span className="text-[12px] text-ink">{r.agent}</span>
+                <span className="ml-auto font-mono text-[10px]" style={{ color: r.age_days > 2 ? "var(--color-bad)" : "var(--color-ink-faint)" }}>{r.age_days}d</span>
               </div>
             ))}
           </div>
@@ -324,16 +321,14 @@ function FlowView() {
       </div>
 
       {d.blocking_questions.length > 0 && (
-        <div className="rounded-lg border border-bad/40 bg-bad/5 p-3">
-          <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-bad">
-            Blocking questions aging
-          </h3>
+        <div className="referee" style={{ background: "var(--crit-soft)", borderColor: "var(--crit-soft)", borderLeftColor: "var(--color-bad)" }}>
+          <div className="referee-kicker">Blocking questions aging</div>
           {d.blocking_questions.map((bq, i) => (
-            <div key={i} className="flex flex-wrap gap-2 text-[11px]">
-              <span className="font-mono text-accent">{bq.jira_key}</span>
+            <div key={i} className="flex flex-wrap items-center gap-2 py-1 text-[12px]">
+              <span className="card-id">{bq.jira_key}</span>
               <span className="text-ink">{bq.question}</span>
-              <span className="text-ink-faint">→ {bq.owner?.replaceAll("_", " ").toLowerCase()}</span>
-              <span className="ml-auto font-mono text-[10px] text-bad">{bq.age_days}d</span>
+              <span className="font-mono text-[10px] text-ink-faint">→ {bq.owner?.replaceAll("_", " ").toLowerCase()}</span>
+              <span className="ml-auto font-mono text-[10px]" style={{ color: "var(--color-bad)" }}>{bq.age_days}d</span>
             </div>
           ))}
         </div>
@@ -351,60 +346,60 @@ function QualityView() {
   const p = d.test_pyramid;
   return (
     <div>
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Quality — is it proven?</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Live. Traceability integrity (the real RTM), pyramid shape, first-time-right per
         agent, and the flake index.
       </p>
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      <div className="kpi-row">
         {[
           ["Pyramid (unit/api/ui)", `${p.unit}/${p.api}/${p.ui}`],
           ["Uncovered example cards", String(d.uncovered_example_cards)],
           ["Flaky signatures (high)", `${d.flake_index.total} (${d.flake_index.high_score})`],
           ["Expired quarantines", String(d.flake_index.expired_quarantines)],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className="text-lg font-bold text-ink">{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 20 }}>{val}</div>
           </div>
         ))}
       </div>
 
       {d.traceability.length > 0 && (
-        <div className="mb-4 overflow-x-auto rounded-lg border border-line bg-panel">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
-                <th className="px-3 py-2">Story</th><th className="px-3 py-2">ACs</th>
-                <th className="px-3 py-2">Covered</th><th className="px-3 py-2">Partial</th>
-                <th className="px-3 py-2">Not covered</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.traceability.map((t) => (
-                <tr key={t.jira_key} className="border-b border-line/50">
-                  <td className="px-3 py-1.5 font-mono text-accent">{t.jira_key}</td>
-                  <td className="px-3 py-1.5">{t.ac_total}</td>
-                  <td className="px-3 py-1.5 text-ok">{t.covered}</td>
-                  <td className="px-3 py-1.5 text-warn">{t.partial}</td>
-                  <td className={`px-3 py-1.5 ${t.not_covered ? "text-bad" : "text-ink-dim"}`}>{t.not_covered}</td>
+        <div className="panel-block" style={{ padding: 0 }}>
+          <div className="dtable" style={{ padding: 20, overflowX: "auto" }}>
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>Story</th><th>ACs</th><th>Covered</th><th>Partial</th><th>Not covered</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {d.traceability.map((t) => (
+                  <tr key={t.jira_key}>
+                    <td className="idcell">{t.jira_key}</td>
+                    <td>{t.ac_total}</td>
+                    <td style={{ color: "var(--color-ok)" }}>{t.covered}</td>
+                    <td style={{ color: "var(--color-warn)" }}>{t.partial}</td>
+                    <td style={{ color: t.not_covered ? "var(--color-bad)" : "var(--color-ink-dim)" }}>{t.not_covered}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {d.first_time_right.length > 0 && (
-        <div className="rounded-lg border border-line bg-panel p-3">
-          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-            First-time-right per agent (lowest first — most human rework)
-          </h3>
-          <div className="flex flex-col gap-1 text-[11px]">
+        <div className="panel-block">
+          <div className="section-label">First-time-right per agent (lowest first — most human rework)</div>
+          <div className="flex flex-col gap-1.5">
             {d.first_time_right.map((f) => (
-              <div key={f.agent_key} className="flex gap-2">
+              <div key={f.agent_key} className="flex items-center gap-2 text-[12px]">
                 <span className="text-ink">{f.agent_name}</span>
-                <span className={`ml-auto font-mono ${f.first_time_right_rate >= 0.8 ? "text-ok" : "text-warn"}`}>
+                <span
+                  className="ml-auto font-mono"
+                  style={{ color: f.first_time_right_rate >= 0.8 ? "var(--color-ok)" : "var(--color-warn)" }}
+                >
                   {pct(f.first_time_right_rate)} of {f.accepted}
                 </span>
               </div>
@@ -418,6 +413,14 @@ function QualityView() {
 
 // --------------------------------------------------------------- Worklist
 
+const SEV_PILL: Record<string, string> = {
+  BLOCKER: "pill-crit",
+  CRITICAL: "pill-crit",
+  HIGH: "pill-crit",
+  MEDIUM: "pill-warn",
+  LOW: "pill-slate",
+};
+
 function WorklistView() {
   const storiesQ = useQuery({ queryKey: ["stories"], queryFn: () => api.stories() });
   const [storyId, setStoryId] = useState("");
@@ -428,23 +431,15 @@ function WorklistView() {
   });
   const stories = storiesQ.data ?? [];
   const d = wlQ.data;
-  const SEV: Record<string, string> = {
-    BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
-    CRITICAL: "border-bad/50 bg-bad/10 text-bad",
-    HIGH: "border-bad/40 bg-bad/5 text-bad",
-    MEDIUM: "border-warn/50 bg-warn/10 text-warn",
-    LOW: "border-line text-ink-dim",
-  };
   return (
     <div>
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Worklist — what do I fix?</h2>
       <p className="mb-3 text-[11px] text-ink-dim">
         Live. Every finding across the story's latest runs, strongest first.
       </p>
       <select
         value={storyId}
         onChange={(e) => setStoryId(e.target.value)}
-        className="mb-3 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+        className="role-select mb-3"
       >
         <option value="">Select a story…</option>
         {stories.map((s) => (
@@ -453,21 +448,21 @@ function WorklistView() {
       </select>
       {d && (
         d.items.length === 0 ? (
-          <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+          <div className="panel-block text-center text-sm text-ink-faint">
             No findings — nothing to fix on this story right now.
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             {d.items.map((i, idx) => (
-              <div key={idx} className="rounded border border-line bg-panel px-3 py-2">
+              <div key={idx} className="panel-block" style={{ marginBottom: 0, padding: "10px 14px" }}>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge className={SEV[i.severity] ?? "border-line text-ink-dim"}>{i.severity}</Badge>
-                  <span className="text-xs font-medium text-ink">{i.title}</span>
+                  <span className={`pill ${SEV_PILL[i.severity] ?? "pill-slate"}`}>{i.severity}</span>
+                  <span className="text-[13px] font-medium text-ink">{i.title}</span>
                   <span className="ml-auto font-mono text-[10px] text-ink-faint">
                     {i.agent_name} · {i.phase}
                   </span>
                 </div>
-                {i.detail && <div className="mt-0.5 text-[11px] text-ink-dim">{i.detail}</div>}
+                {i.detail && <div className="mt-1 text-[11.5px] text-ink-dim">{i.detail}</div>}
               </div>
             ))}
           </div>

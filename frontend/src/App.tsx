@@ -10,7 +10,7 @@ import { PushQueueView } from "./components/PushQueueView";
 import { SettingsPage } from "./components/SettingsPage";
 import { WorkQueue } from "./components/WorkQueue";
 import { ROLES, type Role } from "./types";
-import { Badge, Button, inputCls, useToast } from "./ui";
+import { useToast } from "./ui";
 import { useLiveUpdates } from "./ws";
 
 type Theme = "light" | "dark";
@@ -117,85 +117,83 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="masthead-ledger flex flex-wrap items-center gap-4 border-b border-line px-5 py-3 backdrop-blur">
-        <div className="flex flex-col gap-0.5">
-          <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-ink-dim">
-            <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-ok animate-pulse-ring" />
-            Compliance Operations &middot; Live Session
-          </span>
-          <span className="font-serif text-lg font-bold italic tracking-tight text-ink">
-            AI Agentic <span className="not-italic text-accent">QE</span>
-          </span>
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
-            AI That Tests. Humans Who Trust.
-          </span>
+      <div className="masthead">
+        <div className="masthead-inner">
+          <div>
+            <div className="eyebrow">
+              <span className="pulse" />
+              Compliance Operations &middot; Live Session
+            </div>
+            <h1 className="brand">
+              AI Agentic <em>QE</em>
+            </h1>
+            <div className="tagline" style={{ color: "#fff" }}>
+              AI That Tests. Humans Who Trust.
+            </div>
+          </div>
+          <div className="masthead-meta">
+            <div className="meta-block">
+              <div className="meta-label">FCA Impact Key</div>
+              <div className="tier-key">
+                <span className="tier-chip low">Low</span>
+                <span className="tier-chip med">Med</span>
+                <span className="tier-chip high">High</span>
+              </div>
+            </div>
+            <div className="meta-block">
+              <div className="meta-label">Session</div>
+              <div className="meta-value">
+                {new Date().toLocaleDateString(undefined, {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <nav className="flex gap-1">
+      <nav className="navstrip">
+        <div className="navlinks">
           {TABS.map((t) => (
             <button
               key={t.id}
+              type="button"
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === t.id
-                  ? "bg-accent/15 text-accent"
-                  : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-              }`}
+              className={tab === t.id ? "active" : ""}
             >
               {t.label}
               {t.id === "work" && workCount > 0 && (
-                <span className="rounded-full bg-warn/20 px-1.5 text-[10px] font-bold text-warn">
-                  {workCount}
-                </span>
+                <span className="nav-badge">{workCount}</span>
               )}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-3">
-          <div className="hidden items-center gap-1.5 xl:flex">
-            <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
-              FCA Impact
-            </span>
-            <Badge className="border-ok/40 bg-ok/10 text-ok">Low</Badge>
-            <Badge className="border-warn/40 bg-warn/10 text-warn">Med</Badge>
-            <Badge className="border-bad/40 bg-bad/10 text-bad">High</Badge>
-          </div>
-          <div className="hidden flex-col items-end 2xl:flex">
-            <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
-              Session
-            </span>
-            <span className="font-mono text-[11px] text-ink">
-              {new Date().toLocaleDateString(undefined, {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-              })}
-            </span>
-          </div>
-          {health.data?.demo_mode && (
-            <span className="rounded border border-warn/40 bg-warn/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warn">
-              Demo mode
-            </span>
-          )}
+        <div className="navctl">
+          {health.data?.demo_mode && <span className="demo-pill">Demo Mode</span>}
           <span
+            className="live-pill"
             title={connected ? "Live updates connected" : "Reconnecting — polling fallback active"}
-            className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-faint"
           >
-            <span
-              className={`h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-warn animate-pulse-dot"}`}
-            />
+            {connected ? (
+              <span className="pulse" />
+            ) : (
+              <span
+                className="h-2 w-2 rounded-full bg-warn animate-pulse-dot"
+                style={{ display: "inline-block" }}
+              />
+            )}
             {connected ? "Live" : "Polling"}
           </span>
-          <div className="flex items-center gap-0.5 rounded-full border border-line bg-panel-2 p-0.5" role="group" aria-label="Theme">
+          <div className="theme-toggle" role="group" aria-label="Theme">
             <button
               type="button"
               onClick={() => setTheme("light")}
               aria-pressed={theme === "light"}
               title="Light theme"
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                theme === "light" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
-              }`}
+              className={theme === "light" ? "theme-btn active" : "theme-btn"}
             >
               <SunIcon /> Light
             </button>
@@ -204,9 +202,7 @@ export default function App() {
               onClick={() => setTheme("dark")}
               aria-pressed={theme === "dark"}
               title="Dark theme"
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                theme === "dark" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
-              }`}
+              className={theme === "dark" ? "theme-btn active" : "theme-btn"}
             >
               <MoonIcon /> Dark
             </button>
@@ -215,7 +211,7 @@ export default function App() {
             value={role}
             onChange={(e) => setRolePersist(e.target.value as Role)}
             title="Your role — drives your work queue"
-            className={`${inputCls} w-44`}
+            className="role-select"
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>
@@ -226,18 +222,21 @@ export default function App() {
           <input
             value={actor}
             onChange={(e) => setActorPersist(e.target.value)}
-            placeholder="Your name (required for actions)"
-            className={`${inputCls} w-52`}
+            placeholder="Your name"
+            title="Your name — required for actions"
+            className="role-select"
+            style={{ width: 150 }}
           />
-          <Button
-            variant="primary"
-            busy={syncMutation.isPending}
+          <button
+            type="button"
+            className="sync-btn"
+            disabled={syncMutation.isPending}
             onClick={() => syncMutation.mutate()}
           >
-            ⟳ Sync from Jira
-          </Button>
+            &#8635; Sync from Jira
+          </button>
         </div>
-      </header>
+      </nav>
 
       <main className="min-h-0 flex-1 overflow-auto">
         {tab === "work" && (

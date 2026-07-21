@@ -1,118 +1,106 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "../api";
-import type { AgentDef, Phase, StoryBoard } from "../types";
+import type { Phase, RunStatus, StoryBoard } from "../types";
 import { PHASES } from "../types";
-import { Badge, Button, GATE_STATUS_META, RUN_STATUS_META, useToast } from "../ui";
+import { GATE_STATUS_META, useToast } from "../ui";
 import { StoryDrawer } from "./StoryDrawer";
 
 const PHASE_LABELS: Record<Phase, string> = {
-  REFINEMENT: "1 · Refinement",
-  DEVELOPMENT: "2 · Development",
-  TESTING: "3 · Testing",
-  RELEASE: "4 · Release",
+  REFINEMENT: "Refinement",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  RELEASE: "Release",
+};
+const PHASE_COL_CLASS: Record<Phase, string> = {
+  REFINEMENT: "col-refinement",
+  DEVELOPMENT: "col-dev",
+  TESTING: "col-test",
+  RELEASE: "col-release",
 };
 
-const FCA_COLORS: Record<string, string> = {
-  HIGH: "border-bad/50 text-bad bg-bad/10",
-  MEDIUM: "border-warn/50 text-warn bg-warn/10",
-  LOW: "border-ok/40 text-ok bg-ok/10",
+// Each run's status becomes one segment of the card's instrument meter.
+const METER_CLASS: Record<RunStatus, string> = {
+  ACCEPTED: "g",
+  AWAITING_APPROVAL: "w",
+  RUNNING: "p",
+  COMPLETED: "w",
+  REJECTED: "b",
+  FAILED: "b",
+  PROPOSED: "",
+  RERUN_REQUESTED: "",
+  SKIPPED: "",
 };
 
-const CLOUD_COLORS: Record<string, string> = {
-  FSC: "border-sky-400/40 text-sky-300",
-  SALES: "border-indigo-400/40 text-indigo-300",
-  MARKETING: "border-pink-400/40 text-pink-300",
-};
+const FCA_TIER: Record<string, string> = { HIGH: "high", MEDIUM: "med", LOW: "low" };
 
 function StoryCard({
   story,
-  agents,
   onOpen,
+  delay,
 }: {
   story: StoryBoard;
-  agents: Map<string, AgentDef>;
   onOpen: () => void;
+  delay: number;
 }) {
   const phaseRuns = story.runs
     .filter((r) => r.phase === story.current_phase)
     .sort((a, b) => a.sequence - b.sequence);
   const gate = story.gates.find((g) => g.phase === story.current_phase);
   const gateMeta = gate ? GATE_STATUS_META[gate.status] : null;
+  const gateReady = gate?.status === "READY_FOR_SIGNOFF" || gate?.status === "SIGNED_OFF";
 
   return (
     <button
       onClick={onOpen}
-      className={`w-full rounded-lg border bg-panel p-3 text-left transition-all hover:border-accent/50 hover:shadow-[0_0_20px_rgba(56,189,248,0.08)] ${
-        story.scope_status === "OUT_OF_SCOPE"
-          ? "border-line opacity-45"
-          : "border-line"
-      }`}
+      className="card"
+      style={{ animationDelay: `${delay}s`, opacity: story.scope_status === "OUT_OF_SCOPE" ? 0.5 : 1 }}
     >
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="font-mono text-xs font-semibold text-accent">
-          {story.jira_key}
-        </span>
-        {story.cloud && (
-          <Badge className={CLOUD_COLORS[story.cloud] ?? "border-line text-ink-dim"}>
-            {story.cloud}
-          </Badge>
-        )}
+      <div className="card-top">
+        <span className="card-id">{story.jira_key}</span>
+        {story.story_points != null && <span className="card-pt">{story.story_points}pt</span>}
+      </div>
+      <div className="chips">
+        {story.cloud && <span className="chip">{story.cloud}</span>}
         {story.fca_impact && (
-          <Badge className={FCA_COLORS[story.fca_impact]}>
+          <span className={`chip tier-${FCA_TIER[story.fca_impact] ?? "low"}`}>
             FCA {story.fca_impact}
             {!story.fca_impact_confirmed && " ?"}
-          </Badge>
-        )}
-        {story.story_points != null && (
-          <span className="ml-auto font-mono text-[10px] text-ink-faint">
-            {story.story_points}pt
           </span>
         )}
       </div>
 
-      <p className="mb-2 line-clamp-2 text-xs leading-snug text-ink">
-        {story.summary}
-      </p>
+      <p className="card-title">{story.summary}</p>
 
       {story.changed_since_agent_run && (
-        <div className="mb-2 rounded border border-warn/40 bg-warn/10 px-2 py-1 text-[10px] font-medium text-warn">
-          ⚠ Jira changed since last agent run
-        </div>
+        <p className="mb-2 font-mono text-[10.5px]" style={{ color: "var(--color-warn)" }}>
+          &#9888; Jira changed since last agent run
+        </p>
       )}
       {story.scope_status === "OUT_OF_SCOPE" && (
-        <div className="mb-2 rounded border border-line px-2 py-1 text-[10px] font-medium text-ink-faint">
-          Out of scope — removed from sprint (history preserved)
-        </div>
+        <p className="mb-2 font-mono text-[10.5px] text-ink-faint">
+          Out of scope — history preserved
+        </p>
       )}
       {story.released && (
-        <div className="mb-2 rounded border border-ok/40 bg-ok/10 px-2 py-1 text-[10px] font-medium text-ok">
-          ✓ Released — all four gates signed off
+        <p className="mb-2 font-mono text-[10.5px]" style={{ color: "var(--color-ok)" }}>
+          &#10003; Released — all four gates signed off
+        </p>
+      )}
+
+      {phaseRuns.length > 0 && (
+        <div className="meter">
+          {phaseRuns.map((run) => (
+            <i key={run.id} className={METER_CLASS[run.status]} title={run.status} />
+          ))}
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          {phaseRuns.map((run) => {
-            const meta = RUN_STATUS_META[run.status];
-            const agent = agents.get(run.agent_key);
-            return (
-              <span
-                key={run.id}
-                title={`${agent?.name ?? run.agent_key} — ${meta.label}${run.attempt > 1 ? ` (attempt ${run.attempt})` : ""}`}
-                className={`h-2.5 w-2.5 rounded-full ${meta.dot}`}
-              />
-            );
-          })}
+      {gateMeta && (
+        <div className="card-foot">
+          <span className={`seal ${gateReady ? "ready" : "locked"}`}>{gateMeta.label}</span>
         </div>
-        {gateMeta && (
-          <span
-            className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${gateMeta.cls}`}
-          >
-            Gate: {gateMeta.label}
-          </span>
-        )}
-      </div>
+      )}
     </button>
   );
 }
@@ -159,47 +147,60 @@ export function PipelineBoard({ actor }: { actor: string }) {
         <p className="text-sm text-ink-dim">
           No stories yet. Sync from Jira, or seed the demo sprint.
         </p>
-        <Button
-          variant="primary"
-          busy={seedMutation.isPending}
+        <button
+          type="button"
+          className="sync-btn"
+          disabled={seedMutation.isPending}
           onClick={() => seedMutation.mutate()}
         >
           Seed demo sprint
-        </Button>
+        </button>
       </div>
     );
   }
 
+  const byPhase = PHASES.map((phase) => ({
+    phase,
+    stories: stories.filter(
+      (s) => s.current_phase === phase && !(s.released && phase !== "RELEASE"),
+    ),
+  }));
+  const summary = byPhase
+    .map(({ phase, stories: s }) => `${s.length} ${PHASE_LABELS[phase].toLowerCase()}`)
+    .join(" · ");
+
   return (
     <>
-      <div className="grid min-w-[1000px] grid-cols-4 gap-4 p-5">
-        {PHASES.map((phase) => {
-          const inPhase = stories.filter(
-            (s) => s.current_phase === phase && !(s.released && phase !== "RELEASE"),
-          );
-          return (
-            <section key={phase} className="min-w-0">
-              <header className="mb-3 flex items-center justify-between border-b border-line pb-2">
-                <h2 className="text-xs font-bold uppercase tracking-[0.15em] text-ink-dim">
-                  {PHASE_LABELS[phase]}
-                </h2>
-                <span className="font-mono text-[10px] text-ink-faint">
-                  {inPhase.length}
-                </span>
-              </header>
-              <div className="flex flex-col gap-2.5">
-                {inPhase.map((story) => (
-                  <StoryCard
-                    key={story.id}
-                    story={story}
-                    agents={agents}
-                    onOpen={() => setOpenStoryId(story.id)}
-                  />
-                ))}
+      <div className="stage">
+        <div className="board-head">
+          <div className="board-title">Pipeline</div>
+          <div className="board-sub">{summary}</div>
+        </div>
+
+        <div className="board">
+          {byPhase.map(({ phase, stories: inPhase }) => (
+            <div key={phase}>
+              <div className={`col-head ${PHASE_COL_CLASS[phase]}`}>
+                <h3>{PHASE_LABELS[phase]}</h3>
+                <span className="n">{inPhase.length}</span>
               </div>
-            </section>
-          );
-        })}
+              <div className="col-body">
+                {inPhase.length === 0 ? (
+                  <div className="empty-col">Nothing in flight</div>
+                ) : (
+                  inPhase.map((story, i) => (
+                    <StoryCard
+                      key={story.id}
+                      story={story}
+                      onOpen={() => setOpenStoryId(story.id)}
+                      delay={i * 0.04}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {openStoryId && (

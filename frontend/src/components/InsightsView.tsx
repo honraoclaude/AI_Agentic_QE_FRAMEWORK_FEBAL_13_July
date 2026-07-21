@@ -2,53 +2,44 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { AgentPerf, FlakySig } from "../types";
-import { Badge, Button, useToast } from "../ui";
+import { useToast } from "../ui";
 
-function trustCls(t: number | null): string {
-  if (t === null) return "text-ink-faint";
-  if (t >= 85) return "text-ok";
-  if (t >= 60) return "text-warn";
-  return "text-bad";
+function trustColor(t: number | null): string {
+  if (t === null) return "var(--color-ink-faint)";
+  if (t >= 85) return "var(--color-ok)";
+  if (t >= 60) return "var(--color-warn)";
+  return "var(--color-bad)";
 }
 
 function TrustBar({ value }: { value: number | null }) {
   if (value === null) return <span className="text-ink-faint">—</span>;
-  const cls = value >= 85 ? "bg-ok" : value >= 60 ? "bg-warn" : "bg-bad";
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-panel-2">
-        <div className={`h-full ${cls}`} style={{ width: `${value}%` }} />
-      </div>
-      <span className={`font-mono text-[11px] ${trustCls(value)}`}>{value}</span>
+    <div className="flex items-center">
+      <span className="bar-track">
+        <span className="bar-fill" style={{ width: `${value}%`, background: trustColor(value) }} />
+      </span>
+      <span className="font-mono text-[11px]" style={{ color: trustColor(value) }}>{value}</span>
     </div>
   );
 }
 
 function AgentRow({ a }: { a: AgentPerf }) {
   return (
-    <tr className="border-b border-line/50 align-top">
-      <td className="py-2 pr-3">
+    <tr>
+      <td>
         <div className="text-ink">{a.agent_name}</div>
-        <div className="text-[10px] uppercase tracking-wider text-ink-faint">{a.phase}</div>
+        <div className="font-mono text-[9.5px] uppercase tracking-wider text-ink-faint">{a.phase}</div>
       </td>
-      <td className="py-2 pr-3">
-        <TrustBar value={a.trust_score} />
+      <td><TrustBar value={a.trust_score} /></td>
+      <td className="mono">
+        <span style={{ color: "var(--color-ok)" }}>{a.accepted}✓</span>{" "}
+        <span style={{ color: "var(--color-bad)" }}>{a.rejected}✗</span>{" "}
+        <span style={{ color: "var(--color-warn)" }}>{a.reruns}↻</span>
       </td>
-      <td className="py-2 pr-3 font-mono text-[11px]">
-        <span className="text-ok">{a.accepted}✓</span>{" "}
-        <span className="text-bad">{a.rejected}✗</span>{" "}
-        <span className="text-warn">{a.reruns}↻</span>
-      </td>
-      <td className="py-2 pr-3 font-mono text-[11px] text-ink-dim">
-        {a.avg_attempts ?? "—"}
-      </td>
-      <td className="py-2 pr-3 font-mono text-[10px] text-ink-faint">
-        {a.verdicts.PASS}/{a.verdicts.WARN}/{a.verdicts.FAIL}
-      </td>
-      <td className="py-2 text-[11px] text-ink-dim">
-        {a.guidance_samples[0] ?? a.reject_reasons[0] ?? (
-          <span className="text-ink-faint">—</span>
-        )}
+      <td className="mono">{a.avg_attempts ?? "—"}</td>
+      <td className="mono">{a.verdicts.PASS}/{a.verdicts.WARN}/{a.verdicts.FAIL}</td>
+      <td className="text-[12px] text-ink-dim">
+        {a.guidance_samples[0] ?? a.reject_reasons[0] ?? <span className="text-ink-faint">—</span>}
       </td>
     </tr>
   );
@@ -65,69 +56,72 @@ export function InsightsView({ actor }: { actor: string }) {
   const withData = data.agents.filter((a) => a.decided > 0 || a.reruns > 0);
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Agent Performance & Human Feedback</h2>
+    <div className="stage">
+      <div className="board-head">
+        <div className="board-title">Agent Insights</div>
+        <div className="board-sub">Human feedback, eval scorecard, operational health &amp; flaky-test intelligence</div>
+      </div>
       <p className="mb-4 text-[11px] text-ink-dim">
         Learned from the decisions humans already make — Accept, Reject and Re-run-with-guidance.
         A low trust score means humans frequently override that agent; act on it by tuning its prompt.
       </p>
 
-      <div className="mb-5 grid grid-cols-4 gap-3">
+      <div className="kpi-row">
         {[
           ["Overall acceptance", s.overall_acceptance_rate === null ? "—" : `${Math.round(s.overall_acceptance_rate * 100)}%`],
           ["Accepted", String(s.total_accepted)],
           ["Rejected", String(s.total_rejected)],
           ["Re-runs", String(s.total_reruns)],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className="text-lg font-bold text-ink">{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>{val}</div>
           </div>
         ))}
       </div>
 
       {data.needs_attention.length > 0 && (
-        <div className="mb-5 rounded-lg border border-warn/40 bg-warn/5 p-3">
-          <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-warn">
-            Most human pushback
-          </h3>
+        <div className="referee">
+          <div className="referee-kicker">Most human pushback</div>
           <div className="flex flex-wrap gap-2">
             {data.needs_attention.map((a) => (
-              <Badge key={a.agent_key} className="border-warn/40 text-warn">
+              <span key={a.agent_key} className="pill pill-warn">
                 {a.agent_name} · trust {a.trust_score}
-              </Badge>
+              </span>
             ))}
           </div>
         </div>
       )}
 
       {withData.length === 0 ? (
-        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+        <div className="panel-block text-center text-sm text-ink-faint">
           No human decisions recorded yet. Approve, reject or re-run some agents and this
           fills in.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-panel">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
-                <th className="px-3 py-2 font-medium">Agent</th>
-                <th className="px-3 py-2 font-medium">Trust</th>
-                <th className="px-3 py-2 font-medium">✓ / ✗ / ↻</th>
-                <th className="px-3 py-2 font-medium">Avg attempts</th>
-                <th className="px-3 py-2 font-medium">P/W/F</th>
-                <th className="px-3 py-2 font-medium">Latest feedback</th>
-              </tr>
-            </thead>
-            <tbody>
-              {withData
-                .slice()
-                .sort((a, b) => (a.trust_score ?? 101) - (b.trust_score ?? 101))
-                .map((a) => (
-                  <AgentRow key={a.agent_key} a={a} />
-                ))}
-            </tbody>
-          </table>
+        <div className="panel-block" style={{ padding: 0 }}>
+          <div className="dtable" style={{ padding: 20, overflowX: "auto" }}>
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Trust</th>
+                  <th>✓ / ✗ / ↻</th>
+                  <th>Avg attempts</th>
+                  <th>P/W/F</th>
+                  <th>Latest feedback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {withData
+                  .slice()
+                  .sort((a, b) => (a.trust_score ?? 101) - (b.trust_score ?? 101))
+                  .map((a) => (
+                    <AgentRow key={a.agent_key} a={a} />
+                  ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -153,83 +147,84 @@ function EvalScorecardSection() {
   const s = data.summary;
 
   return (
-    <div className="mb-8">
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Eval Scorecard</h2>
+    <div style={{ marginTop: 32 }}>
+      <div className="panel-block-title" style={{ fontFamily: "var(--font-serif)", fontStyle: "italic", fontSize: 16, marginBottom: 6 }}>
+        Eval Scorecard
+      </div>
       <p className="mb-4 text-[11px] text-ink-dim">
         The golden-dataset harness, graded live against the demo path — expert-labelled
         cases, not vibes. Demo-path only today (regression gate for the fixture
         generator); a live-model runner against real Claude is a separate follow-up.
       </p>
 
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      <div className="kpi-row">
         {[
           ["Agent coverage", `${s.agents_with_golden_data}/${s.agents_total} (${s.coverage_percent}%)`],
           ["Total cases", String(s.total_cases)],
           ["Passed", String(s.total_passed)],
           ["Failed", String(s.total_failed)],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className={`text-lg font-bold ${label === "Failed" && s.total_failed > 0 ? "text-bad" : "text-ink"}`}>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 20, color: label === "Failed" && s.total_failed > 0 ? "var(--color-bad)" : undefined }}>
               {val}
             </div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
           </div>
         ))}
       </div>
 
       {data.agents.length === 0 ? (
-        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
-          No golden datasets yet.
-        </div>
+        <div className="panel-block text-center text-sm text-ink-faint">No golden datasets yet.</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-panel">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
-                <th className="px-3 py-2 font-medium">Agent</th>
-                <th className="px-3 py-2 font-medium">Cases</th>
-                <th className="px-3 py-2 font-medium">Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.agents.map((a) => (
-                <>
-                  <tr key={a.agent_key} className="border-b border-line/50 align-top">
-                    <td className="px-3 py-2 text-ink">{a.agent_name}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">{a.cases}</td>
-                    <td className="px-3 py-2">
-                      {a.failed === 0 ? (
-                        <span className="font-mono text-[11px] text-ok">✓ {a.passed}/{a.cases}</span>
-                      ) : (
-                        <button
-                          className="font-mono text-[11px] text-bad hover:underline"
-                          onClick={() => setExpanded(expanded === a.agent_key ? null : a.agent_key)}
-                        >
-                          ✗ {a.passed}/{a.cases} — {expanded === a.agent_key ? "hide" : "show"} failures
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  {expanded === a.agent_key && a.failing_cases.map((fc, i) => (
-                    <tr key={`${a.agent_key}-fail-${i}`} className="border-b border-line/50 bg-bad/5">
-                      <td colSpan={3} className="px-3 py-2 text-[11px]">
-                        <span className="font-mono text-bad">{fc.case}</span>
-                        <ul className="ml-3 mt-1 list-inside list-disc text-ink-dim">
-                          {fc.failing_checks.map((c, j) => (
-                            <li key={j}>
-                              <span className="font-mono text-[10px]">{c.path}</span>: expected{" "}
-                              <span className="text-ink">{JSON.stringify(c.expected)}</span>, got{" "}
-                              <span className="text-bad">{JSON.stringify(c.actual)}</span>
-                            </li>
-                          ))}
-                        </ul>
+        <div className="panel-block" style={{ padding: 0 }}>
+          <div className="dtable" style={{ padding: 20, overflowX: "auto" }}>
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr><th>Agent</th><th>Cases</th><th>Result</th></tr>
+              </thead>
+              <tbody>
+                {data.agents.map((a) => (
+                  <>
+                    <tr key={a.agent_key}>
+                      <td>{a.agent_name}</td>
+                      <td className="mono">{a.cases}</td>
+                      <td>
+                        {a.failed === 0 ? (
+                          <span className="font-mono text-[11px]" style={{ color: "var(--color-ok)" }}>
+                            ✓ {a.passed}/{a.cases}
+                          </span>
+                        ) : (
+                          <button
+                            className="font-mono text-[11px] hover:underline"
+                            style={{ color: "var(--color-bad)" }}
+                            onClick={() => setExpanded(expanded === a.agent_key ? null : a.agent_key)}
+                          >
+                            ✗ {a.passed}/{a.cases} — {expanded === a.agent_key ? "hide" : "show"} failures
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  ))}
-                </>
-              ))}
-            </tbody>
-          </table>
+                    {expanded === a.agent_key && a.failing_cases.map((fc, i) => (
+                      <tr key={`${a.agent_key}-fail-${i}`} style={{ background: "var(--crit-soft)" }}>
+                        <td colSpan={3} className="text-[11px]">
+                          <span className="font-mono" style={{ color: "var(--color-bad)" }}>{fc.case}</span>
+                          <ul className="ml-3 mt-1 list-inside list-disc text-ink-dim">
+                            {fc.failing_checks.map((c, j) => (
+                              <li key={j}>
+                                <span className="font-mono text-[10px]">{c.path}</span>: expected{" "}
+                                <span className="text-ink">{JSON.stringify(c.expected)}</span>, got{" "}
+                                <span style={{ color: "var(--color-bad)" }}>{JSON.stringify(c.actual)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -268,25 +263,27 @@ function FlakyIntel({ actor }: { actor: string }) {
   const s = data.summary;
 
   return (
-    <div className="mt-8">
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Flaky-Test Intelligence</h2>
+    <div style={{ marginTop: 32 }}>
+      <div className="panel-block-title" style={{ fontFamily: "var(--font-serif)", fontStyle: "italic", fontSize: 16, marginBottom: 6 }}>
+        Flaky-Test Intelligence
+      </div>
       <p className="mb-4 text-[11px] text-ink-dim">
         Cross-run memory: recurring failure signatures fingerprinted across runs and
         stories. Known flakes are fed back to the Test Execution Analyst and Defect
-        Triage as evidence (“re-run, not defect”). Quarantine requires an owner and an
+        Triage as evidence (&ldquo;re-run, not defect&rdquo;). Quarantine requires an owner and an
         expiry.
       </p>
 
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      <div className="kpi-row">
         {[
           ["Signatures", String(s.total)],
           ["High score (≥50)", String(s.high_score)],
           ["Quarantined", String(s.quarantined)],
           ["Expired quarantines", String(s.expired_quarantines)],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className="text-lg font-bold text-ink">{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 20 }}>{val}</div>
           </div>
         ))}
       </div>
@@ -295,36 +292,24 @@ function FlakyIntel({ actor }: { actor: string }) {
         {data.signatures.map((sig) => (
           <div
             key={sig.id}
-            className={`rounded-lg border bg-panel p-3 ${
-              sig.quarantine_expired ? "border-bad/60" : "border-line"
-            }`}
+            className="panel-block"
+            style={{ marginBottom: 0, borderColor: sig.quarantine_expired ? "var(--color-bad)" : undefined }}
           >
             <div className="flex flex-wrap items-center gap-1.5">
               <span
-                className={`font-mono text-[11px] font-bold ${
-                  sig.flake_score >= 50 ? "text-bad" : sig.flake_score >= 25 ? "text-warn" : "text-ink-dim"
-                }`}
+                className="font-mono text-[11px] font-bold"
+                style={{ color: sig.flake_score >= 50 ? "var(--color-bad)" : sig.flake_score >= 25 ? "var(--color-warn)" : "var(--color-ink-dim)" }}
               >
                 {sig.flake_score}
               </span>
-              <span className="font-mono text-[10px] text-accent">{sig.ref}</span>
-              <span className="text-xs font-medium text-ink">{sig.test_name}</span>
-              <Badge
-                className={
-                  sig.status === "QUARANTINED"
-                    ? "border-warn/50 bg-warn/10 text-warn"
-                    : sig.status === "CLEARED"
-                      ? "border-line text-ink-faint"
-                      : "border-line text-ink-dim"
-                }
+              <span className="card-id">{sig.ref}</span>
+              <span className="text-[13px] font-medium text-ink">{sig.test_name}</span>
+              <span
+                className={`pill ${sig.status === "QUARANTINED" ? "pill-warn" : "pill-slate"}`}
               >
                 {sig.status}
-              </Badge>
-              {sig.quarantine_expired && (
-                <Badge className="border-bad/70 bg-bad/20 font-bold text-bad">
-                  QUARANTINE EXPIRED — review
-                </Badge>
-              )}
+              </span>
+              {sig.quarantine_expired && <span className="pill pill-crit">Quarantine expired</span>}
               <span className="ml-auto font-mono text-[10px] text-ink-faint">
                 seen {sig.occurrences}× · {sig.stories_seen.length} story(ies) ·{" "}
                 {sig.flaky_votes} analyst-flaky vote(s)
@@ -333,29 +318,32 @@ function FlakyIntel({ actor }: { actor: string }) {
               </span>
             </div>
             {sig.normalized_message && (
-              <div className="mt-1 font-mono text-[10px] text-ink-faint">
+              <div className="mt-1.5 font-mono text-[10px] text-ink-faint">
                 {sig.normalized_message.slice(0, 160)}
               </div>
             )}
             {sig.status !== "CLEARED" && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 {editing === sig.id ? (
                   <>
                     <input
                       value={owner}
                       onChange={(e) => setOwner(e.target.value)}
                       placeholder="Owner (required)"
-                      className="w-44 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                      className="role-select"
+                      style={{ width: 180 }}
                     />
                     <input
                       value={days}
                       onChange={(e) => setDays(e.target.value)}
                       placeholder="Days"
-                      className="w-16 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                      className="role-select"
+                      style={{ width: 70 }}
                     />
-                    <Button
-                      variant="primary"
-                      busy={quarantine.isPending}
+                    <button
+                      type="button"
+                      className="sync-btn"
+                      disabled={quarantine.isPending}
                       onClick={() => {
                         if (!actor.trim()) {
                           toast("error", "Enter your name in the header first.");
@@ -365,21 +353,21 @@ function FlakyIntel({ actor }: { actor: string }) {
                       }}
                     >
                       Quarantine
-                    </Button>
-                    <Button variant="ghost" onClick={() => setEditing(null)}>
+                    </button>
+                    <button type="button" className="ghost-btn" onClick={() => setEditing(null)}>
                       Cancel
-                    </Button>
+                    </button>
                   </>
                 ) : (
                   <>
                     {sig.status !== "QUARANTINED" && (
-                      <Button onClick={() => { setEditing(sig.id); setOwner(""); }}>
-                        ⏸ Quarantine…
-                      </Button>
+                      <button type="button" className="ghost-btn" onClick={() => { setEditing(sig.id); setOwner(""); }}>
+                        &#9208; Quarantine…
+                      </button>
                     )}
-                    <Button variant="ghost" busy={clear.isPending} onClick={() => clear.mutate(sig)}>
-                      ✓ Clear (fixed)
-                    </Button>
+                    <button type="button" className="ghost-btn" disabled={clear.isPending} onClick={() => clear.mutate(sig)}>
+                      &#10003; Clear (fixed)
+                    </button>
                   </>
                 )}
               </div>
@@ -402,33 +390,33 @@ function OperationalHealth() {
   if (!data || data.agents.length === 0) return null;
   const s = data.summary;
   return (
-    <div className="mt-8">
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Operational Health</h2>
+    <div style={{ marginTop: 32 }}>
+      <div className="panel-block-title" style={{ fontFamily: "var(--font-serif)", fontStyle: "italic", fontSize: 16, marginBottom: 6 }}>
+        Operational Health
+      </div>
       <p className="mb-4 text-[11px] text-ink-dim">
         The SRE layer: failure rates, latency, token spend and reliability per
         prompt version — did the last prompt bump regress?
       </p>
 
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      <div className="kpi-row">
         {[
           ["Executed runs", String(s.total_executed)],
           ["Failed", String(s.total_failed)],
           ["Tokens in", s.total_tokens_in.toLocaleString()],
           ["Tokens out", s.total_tokens_out.toLocaleString()],
         ].map(([label, val]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className="text-lg font-bold text-ink">{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          <div key={label} className="kpi">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ fontSize: 20 }}>{val}</div>
           </div>
         ))}
       </div>
 
       {data.alerts.length > 0 && (
-        <div className="mb-4 rounded-lg border border-bad/40 bg-bad/5 p-3">
-          <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-bad">
-            Alerts
-          </h3>
-          <ul className="flex flex-col gap-1 text-[11px] text-bad">
+        <div className="referee" style={{ background: "var(--crit-soft)", borderColor: "var(--crit-soft)", borderLeftColor: "var(--color-bad)" }}>
+          <div className="referee-kicker">Alerts</div>
+          <ul className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--color-bad)" }}>
             {data.alerts.map((a, i) => (
               <li key={i}>
                 <span className="font-mono text-[10px]">[{a.kind}]</span> {a.detail}
@@ -438,69 +426,56 @@ function OperationalHealth() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-line bg-panel">
-        <table className="w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
-              <th className="px-3 py-2 font-medium">Agent</th>
-              <th className="px-3 py-2 font-medium">Executed</th>
-              <th className="px-3 py-2 font-medium">Failure rate</th>
-              <th className="px-3 py-2 font-medium">Avg / max s</th>
-              <th className="px-3 py-2 font-medium">Tokens (in→out)</th>
-              <th className="px-3 py-2 font-medium">By prompt version</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.agents.map((a) => (
-              <tr key={a.agent_key} className="border-b border-line/50 align-top">
-                <td className="px-3 py-2">
-                  <div className="text-ink">{a.agent_name}</div>
-                  <div className="font-mono text-[10px] text-ink-faint">
-                    now {a.current_prompt_version}
-                  </div>
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
-                  {a.executed}
-                </td>
-                <td className="px-3 py-2">
-                  <span
-                    className={`font-mono text-[11px] ${
-                      a.failure_rate >= 0.25
-                        ? "text-bad"
-                        : a.failure_rate > 0
-                          ? "text-warn"
-                          : "text-ok"
-                    }`}
-                  >
-                    {Math.round(a.failure_rate * 100)}%
-                  </span>
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
-                  {a.avg_duration_s ?? "—"} / {a.max_duration_s ?? "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">
-                  {a.tokens_in.toLocaleString()}→{a.tokens_out.toLocaleString()}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {a.versions.map((v) => (
-                      <Badge
-                        key={v.version}
-                        className={
-                          v.failure_rate >= 0.25
-                            ? "border-bad/50 bg-bad/10 text-bad"
-                            : "border-line text-ink-dim"
-                        }
-                      >
-                        {v.version}: {v.executed}✓{v.failed > 0 ? ` ${v.failed}✗` : ""}
-                      </Badge>
-                    ))}
-                  </div>
-                </td>
+      <div className="panel-block" style={{ padding: 0 }}>
+        <div className="dtable" style={{ padding: 20, overflowX: "auto" }}>
+          <table style={{ width: "100%" }}>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Executed</th>
+                <th>Failure rate</th>
+                <th>Avg / max s</th>
+                <th>Tokens (in→out)</th>
+                <th>By prompt version</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.agents.map((a) => (
+                <tr key={a.agent_key}>
+                  <td>
+                    <div className="text-ink">{a.agent_name}</div>
+                    <div className="font-mono text-[9.5px] text-ink-faint">now {a.current_prompt_version}</div>
+                  </td>
+                  <td className="mono">{a.executed}</td>
+                  <td>
+                    <span
+                      className="font-mono text-[11px]"
+                      style={{
+                        color: a.failure_rate >= 0.25 ? "var(--color-bad)" : a.failure_rate > 0 ? "var(--color-warn)" : "var(--color-ok)",
+                      }}
+                    >
+                      {Math.round(a.failure_rate * 100)}%
+                    </span>
+                  </td>
+                  <td className="mono">{a.avg_duration_s ?? "—"} / {a.max_duration_s ?? "—"}</td>
+                  <td className="mono">{a.tokens_in.toLocaleString()}→{a.tokens_out.toLocaleString()}</td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      {a.versions.map((v) => (
+                        <span
+                          key={v.version}
+                          className={`pill ${v.failure_rate >= 0.25 ? "pill-crit" : "pill-slate"}`}
+                        >
+                          {v.version}: {v.executed}✓{v.failed > 0 ? ` ${v.failed}✗` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -2,19 +2,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { RiskEntry } from "../types";
-import { Badge, Button, useToast } from "../ui";
+import { useToast } from "../ui";
 
 /** Risk Acceptance Register — the quality-debt ledger. Every knowingly-
  *  accepted risk (run accepted despite findings, gate signed over WARNs,
  *  CONDITIONAL_GO) as a managed position: owner, rationale, severity-derived
  *  review-by date, OPEN → REVIEWED → CLOSED. Overdue entries escalate red. */
 
-const SEV_CLS: Record<string, string> = {
-  BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
-  CRITICAL: "border-bad/50 bg-bad/10 text-bad",
-  HIGH: "border-bad/40 bg-bad/5 text-bad",
-  MEDIUM: "border-warn/50 bg-warn/10 text-warn",
-  LOW: "border-line text-ink-dim",
+const SEV_PILL: Record<string, string> = {
+  BLOCKER: "pill-crit",
+  CRITICAL: "pill-crit",
+  HIGH: "pill-crit",
+  MEDIUM: "pill-warn",
+  LOW: "pill-slate",
+};
+const STATUS_PILL: Record<string, string> = {
+  CLOSED: "pill-slate",
+  REVIEWED: "pill-good",
+  OPEN: "pill-warn",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -61,40 +66,46 @@ export function RiskRegisterView({ actor }: { actor: string }) {
   const s = data.summary;
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Risk Acceptance Register</h2>
-      <p className="mb-4 text-[11px] text-ink-dim">
-        The quality-debt ledger: every risk a human knowingly accepted — with owner,
-        rationale and a severity-derived review date. Sign-offs are managed positions,
-        not terminal events.
-      </p>
-
-      <div className="mb-4 grid grid-cols-4 gap-3">
-        {[
-          ["Total entries", String(s.total), ""],
-          ["Open", String(s.open), s.open > 0 ? "text-warn" : ""],
-          ["Overdue for review", String(s.overdue), s.overdue > 0 ? "text-bad" : ""],
-          [
-            "Open by severity",
-            Object.entries(s.by_severity).map(([k, v]) => `${k[0]}:${v}`).join(" ") || "—",
-            "",
-          ],
-        ].map(([label, val, cls]) => (
-          <div key={label} className="rounded-lg border border-line bg-panel p-3">
-            <div className={`text-lg font-bold ${cls || "text-ink"}`}>{val}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
-          </div>
-        ))}
+    <div className="stage">
+      <div className="board-head">
+        <div className="board-title">Risk Acceptance Register</div>
+        <div className="board-sub">
+          Every knowingly-accepted risk — sign-offs are managed positions, not terminal events
+        </div>
       </div>
 
-      <div className="mb-3 flex gap-1">
+      <div className="kpi-row">
+        <div className="kpi">
+          <div className="kpi-label">Total entries</div>
+          <div className="kpi-value">{s.total}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Open</div>
+          <div className="kpi-value" style={{ color: s.open > 0 ? "var(--color-warn)" : undefined }}>
+            {s.open}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Overdue for review</div>
+          <div className="kpi-value" style={{ color: s.overdue > 0 ? "var(--color-bad)" : undefined }}>
+            {s.overdue}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Open by severity</div>
+          <div className="kpi-value" style={{ fontSize: 15 }}>
+            {Object.entries(s.by_severity).map(([k, v]) => `${k[0]}:${v}`).join(" ") || "—"}
+          </div>
+        </div>
+      </div>
+
+      <div className="navlinks" style={{ marginBottom: 14 }}>
         {["", "OPEN", "REVIEWED", "CLOSED"].map((f) => (
           <button
             key={f}
+            type="button"
             onClick={() => setStatusFilter(f)}
-            className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-              statusFilter === f ? "bg-accent/15 text-accent" : "text-ink-dim hover:bg-panel-2"
-            }`}
+            className={statusFilter === f ? "active" : ""}
           >
             {f || "All"}
           </button>
@@ -102,7 +113,7 @@ export function RiskRegisterView({ actor }: { actor: string }) {
       </div>
 
       {entries.length === 0 ? (
-        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+        <div className="panel-block text-center text-sm text-ink-faint">
           No accepted risks on record — nothing has been signed over findings.
         </div>
       ) : (
@@ -110,51 +121,34 @@ export function RiskRegisterView({ actor }: { actor: string }) {
           {entries.map((e) => (
             <div
               key={e.id}
-              className={`rounded-lg border bg-panel p-3 ${
-                e.overdue ? "border-bad/60" : "border-line"
-              }`}
+              className="panel-block"
+              style={{ marginBottom: 0, borderColor: e.overdue ? "var(--color-bad)" : undefined }}
             >
               <div className="flex flex-wrap items-center gap-1.5">
-                <Badge className={SEV_CLS[e.severity] ?? "border-line text-ink-dim"}>
-                  {e.severity}
-                </Badge>
-                <span className="font-mono text-[10px] text-accent">{e.jira_key}</span>
-                <span className="text-xs font-medium text-ink">{e.title}</span>
-                {e.overdue && (
-                  <Badge className="border-bad/70 bg-bad/20 font-bold text-bad">
-                    OVERDUE
-                  </Badge>
-                )}
-                <Badge
-                  className={
-                    e.status === "CLOSED"
-                      ? "border-line text-ink-faint"
-                      : e.status === "REVIEWED"
-                        ? "border-ok/40 text-ok"
-                        : "border-warn/40 text-warn"
-                  }
-                >
-                  {e.status}
-                </Badge>
+                <span className={`pill ${SEV_PILL[e.severity] ?? "pill-slate"}`}>{e.severity}</span>
+                <span className="card-id">{e.jira_key}</span>
+                <span className="text-[13px] font-medium text-ink">{e.title}</span>
+                {e.overdue && <span className="pill pill-crit">OVERDUE</span>}
+                <span className={`pill ${STATUS_PILL[e.status] ?? "pill-slate"}`}>{e.status}</span>
                 <span className="ml-auto font-mono text-[10px] text-ink-faint">
                   {SOURCE_LABEL[e.source] ?? e.source} · review by{" "}
                   {(e.review_by ?? "").slice(0, 10)}
                 </span>
               </div>
-              {e.detail && <div className="mt-1 text-[11px] text-ink-dim">{e.detail}</div>}
-              <div className="mt-1 text-[10px] text-ink-faint">
-                Accepted by <b>{e.accepted_by}</b>
-                {e.rationale && <> — “{e.rationale}”</>}
+              {e.detail && <div className="mt-1.5 text-[12px] text-ink-dim">{e.detail}</div>}
+              <div className="mt-1.5 font-mono text-[10.5px] text-ink-faint">
+                Accepted by <b style={{ color: "var(--color-ink)" }}>{e.accepted_by}</b>
+                {e.rationale && <> — &ldquo;{e.rationale}&rdquo;</>}
                 {e.reviewed_by && (
-                  <> · re-affirmed by {e.reviewed_by} {e.review_note && `(“${e.review_note}”)`}</>
+                  <> · re-affirmed by {e.reviewed_by} {e.review_note && `("${e.review_note}")`}</>
                 )}
                 {e.closed_by && (
-                  <> · closed by {e.closed_by} {e.closure_note && `(“${e.closure_note}”)`}</>
+                  <> · closed by {e.closed_by} {e.closure_note && `("${e.closure_note}")`}</>
                 )}
               </div>
 
               {e.status !== "CLOSED" && (
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2.5 flex gap-2">
                   {action?.entry.id === e.id ? (
                     <div className="flex w-full flex-wrap items-center gap-2">
                       <input
@@ -165,11 +159,13 @@ export function RiskRegisterView({ actor }: { actor: string }) {
                             ? "Why is this still acceptable?"
                             : "Why does this risk no longer exist?"
                         }
-                        className="min-w-[280px] flex-1 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                        className="role-select"
+                        style={{ minWidth: 280, flex: 1 }}
                       />
-                      <Button
-                        variant={action.kind === "review" ? "primary" : "ok"}
-                        busy={act.isPending}
+                      <button
+                        type="button"
+                        className="sync-btn"
+                        disabled={act.isPending}
                         onClick={() => {
                           if (!actor.trim()) {
                             toast("error", "Enter your name in the header first.");
@@ -179,19 +175,27 @@ export function RiskRegisterView({ actor }: { actor: string }) {
                         }}
                       >
                         {action.kind === "review" ? "Re-affirm" : "Close risk"}
-                      </Button>
-                      <Button variant="ghost" onClick={() => setAction(null)}>
+                      </button>
+                      <button type="button" className="ghost-btn" onClick={() => setAction(null)}>
                         Cancel
-                      </Button>
+                      </button>
                     </div>
                   ) : (
                     <>
-                      <Button onClick={() => { setAction({ entry: e, kind: "review" }); setNote(""); }}>
-                        ↻ Review (re-affirm)
-                      </Button>
-                      <Button variant="ghost" onClick={() => { setAction({ entry: e, kind: "close" }); setNote(""); }}>
-                        ✓ Close…
-                      </Button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => { setAction({ entry: e, kind: "review" }); setNote(""); }}
+                      >
+                        &#8635; Review (re-affirm)
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => { setAction({ entry: e, kind: "close" }); setNote(""); }}
+                      >
+                        &#10003; Close…
+                      </button>
                     </>
                   )}
                 </div>
