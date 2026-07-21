@@ -1,0 +1,52 @@
+{
+  "agent": "three_amigos",
+  "description": "Regression cases for real defects found and fixed this session, plus a baseline structural invariant. These are the cheapest, highest-confidence golden cases: each locks down a verified bug so it can never silently return.",
+  "cases": [
+    {
+      "name": "regression_persona_prompt_matches_the_storys_cloud",
+      "labelled_by": "QE lead — verified defect: the developer persona prompt asked about 'SALES rollup configuration', a domain error (rollup is an FSC concept). Fixed to be cloud-appropriate.",
+      "story": {
+        "jira_key": "EVAL-TA-1", "summary": "Opportunity stage automation",
+        "acceptance_criteria": ["The opportunity stage advances only when required fields are complete"],
+        "fca_impact": "MEDIUM", "cloud": "SALES"
+      },
+      "artifacts": [],
+      "expect": [
+        { "path": "persona_prompts.developer.0", "not_contains": "rollup configuration" },
+        { "path": "persona_prompts.developer.0", "contains": "opportunity/pipeline" }
+      ]
+    },
+    {
+      "name": "regression_dod_never_preasserts_the_answer_to_an_open_question",
+      "labelled_by": "QE lead — verified defect: the Definition of Done asserted '0.00 variance' reconciliation while the reconciliation tolerance was simultaneously listed as an open question — a self-contradiction. Fixed: the DoD item now points at the open question instead of pre-answering it.",
+      "story": {
+        "jira_key": "EVAL-TA-2", "summary": "Household net-worth rollup",
+        "acceptance_criteria": ["The household rollup total equals the sum of active accounts"],
+        "fca_impact": "HIGH", "fca_impact_confirmed": true, "cloud": "FSC"
+      },
+      "artifacts": [],
+      "expect": [
+        { "path": "definition_of_done.0.item", "not_contains": "0.00 variance" },
+        { "path": "definition_of_done.0.item", "contains": "Q2" },
+        { "path": "open_questions.1.blocking", "equals": true },
+        { "path": "open_questions.1.question", "contains": "Q2" }
+      ]
+    },
+    {
+      "name": "baseline_structural_invariant",
+      "labelled_by": "QE lead — the session always produces a real example map and agreements log; verdict is always PASS (facilitation never fails, it only surfaces open questions)",
+      "story": {
+        "jira_key": "EVAL-TA-3", "summary": "Household net-worth rollup",
+        "acceptance_criteria": ["The household rollup total equals the sum of active accounts"],
+        "fca_impact": "MEDIUM", "cloud": "FSC"
+      },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "PASS" },
+        { "path": "example_map", "min_len": 2 },
+        { "path": "agreements", "min_len": 2 },
+        { "path": "release_blocking", "equals": false }
+      ]
+    }
+  ]
+}

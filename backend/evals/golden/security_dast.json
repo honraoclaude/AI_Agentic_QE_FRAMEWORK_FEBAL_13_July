@@ -1,0 +1,38 @@
+{
+  "agent": "security_dast",
+  "description": "DAST triage over the running FSC portal. The FSC runtime checklist always injects an IDOR (HIGH) finding on the household REST endpoint, so verdict is FAIL in every case in this fixture — worth locking down as an invariant.",
+  "cases": [
+    {
+      "name": "no_sarif_still_finds_the_portal_checklist_issues",
+      "labelled_by": "Security reviewer — the runtime checklist runs even with no scanner output, and IDOR alone is enough to fail",
+      "story": { "jira_key": "EVAL-SD-1", "summary": "Client portal", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "risk_rating", "equals": "HIGH" },
+        { "path": "counts.high", "equals": 1 },
+        { "path": "security_findings", "min_len": 2 },
+        { "path": "security_findings.0.name", "equals": "IDOR on client record endpoint" },
+        { "path": "security_findings.0.cwe", "equals": "CWE-639" }
+      ]
+    },
+    {
+      "name": "sarif_finding_is_folded_in_ahead_of_the_checklist",
+      "labelled_by": "Security reviewer — scanner-sourced findings are triaged first, then the FSC checklist is appended",
+      "story": { "jira_key": "EVAL-SD-2", "summary": "Client portal", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "SARIF", "filename": "dast.sarif", "summary": "zap scan", "parsed": {
+          "findings": [{"rule": "ReflectedXSS", "level": "error",
+                        "location": "/search", "message": "unescaped query param reflected in response"}]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "security_findings", "min_len": 3 },
+        { "path": "security_findings.0.name", "equals": "ReflectedXSS" },
+        { "path": "security_findings.0.severity", "equals": "HIGH" },
+        { "path": "counts.high", "equals": 2 }
+      ]
+    }
+  ]
+}

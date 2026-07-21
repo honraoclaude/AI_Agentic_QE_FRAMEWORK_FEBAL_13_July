@@ -1,0 +1,76 @@
+{
+  "agent": "ac_compliance",
+  "description": "Requirements traceability matrix. The last criterion is always the one under scrutiny in this fixture — verdict hinges on whether it's FCA-relevant.",
+  "cases": [
+    {
+      "name": "no_metadata_is_not_verifiable_not_a_pass",
+      "labelled_by": "QE lead — implementation cannot be claimed COVERED without a change manifest",
+      "story": {
+        "jira_key": "EVAL-AC-1", "summary": "Household rollup",
+        "acceptance_criteria": ["The rollup total equals the sum of active accounts",
+                                  "Only advisers with permission can trigger a recalculation"],
+        "fca_impact": "MEDIUM", "cloud": "FSC"
+      },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "WARN" },
+        { "path": "ac_mapping.0.status", "equals": "NOT_VERIFIABLE" },
+        { "path": "ac_mapping.1.status", "equals": "NOT_VERIFIABLE" },
+        { "path": "evidence_confidence", "equals": "LOW" },
+        { "path": "coverage.not_verifiable", "equals": 2 }
+      ]
+    },
+    {
+      "name": "non_fca_gap_warns_and_flags_scope_creep",
+      "labelled_by": "QE lead — a non-regulatory coverage gap warns; an unreferenced changed component is scope creep",
+      "story": {
+        "jira_key": "EVAL-AC-2", "summary": "Household rollup",
+        "acceptance_criteria": [
+          "The household rollup total equals the sum of active accounts",
+          "GBP values display with 2 decimal places",
+          "Only advisers with permission can trigger a recalculation"
+        ],
+        "fca_impact": "LOW", "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "METADATA", "filename": "manifest.json", "summary": "changed components", "parsed": {
+          "components": ["HouseholdRollupService", "CurrencyFormatUtil", "PermissionGate"]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "WARN" },
+        { "path": "ac_mapping.0.status", "equals": "COVERED" },
+        { "path": "ac_mapping.1.status", "equals": "PARTIAL" },
+        { "path": "ac_mapping.2.status", "equals": "NOT_COVERED" },
+        { "path": "ac_mapping.2.fca_relevant", "equals": false },
+        { "path": "ac_mapping.2.severity", "equals": "MEDIUM" },
+        { "path": "unmapped_work", "min_len": 1 }
+      ]
+    },
+    {
+      "name": "fca_relevant_gap_blocks_with_high_severity",
+      "labelled_by": "Compliance officer — an uncovered regulatory-evidence criterion (audit record) fails the gate at HIGH severity",
+      "story": {
+        "jira_key": "EVAL-AC-3", "summary": "Household rollup",
+        "acceptance_criteria": [
+          "The household rollup total equals the sum of active accounts",
+          "GBP values display with 2 decimal places",
+          "Every recalculation writes an immutable audit record"
+        ],
+        "fca_impact": "HIGH", "fca_impact_confirmed": true, "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "METADATA", "filename": "manifest.json", "summary": "changed components", "parsed": {
+          "components": ["HouseholdRollupService", "CurrencyFormatUtil", "PermissionGate"]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "ac_mapping.2.status", "equals": "NOT_COVERED" },
+        { "path": "ac_mapping.2.fca_relevant", "equals": true },
+        { "path": "ac_mapping.2.severity", "equals": "HIGH" },
+        { "path": "findings", "min_len": 1 }
+      ]
+    }
+  ]
+}

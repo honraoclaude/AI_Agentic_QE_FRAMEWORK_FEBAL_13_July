@@ -1,0 +1,190 @@
+### PART 61 of 90 - MIGRATION-FILES-CONTENT split (3 complete files: backend/tests/test_settings.py ... backend/tests/test_skip.py) ###
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_settings.py
+================================================================================
+import pytest
+from sqlalchemy import select
+
+from app.models import AuditEvent
+from app.services import settings_service
+
+
+async def test_defaults_returned_when_nothing_stored(session):
+    cfg = await settings_service.get_all(session)
+    assert cfg["jira"]["project_key"] == "WLTH"
+    assert cfg["sync"] == {"enabled": False, "interval_minutes": 15}
+    assert cfg["gates"]["REFINEMENT"]["label"] == "qe-gate-1-passed"
+    assert cfg["gates"]["RELEASE"]["attach_evidence"] is True
+    assert cfg["field_mappings"]["acceptance_criteria"]["mode"] == "description"
+
+
+async def test_partial_update_deep_merges_and_audits(session):
+    cfg = await settings_service.update_settings(
+        session,
+        {
+            "sync": {"enabled": True},
+            "gates": {"REFINEMENT": {"transition_name": "Ready for Dev"}},
+        },
+        actor="Honra",
+    )
+    await session.commit()
+
+    # Patched values applied...
+    assert cfg["sync"]["enabled"] is True
+    assert cfg["gates"]["REFINEMENT"]["transition_name"] == "Ready for Dev"
+    # ...siblings preserved by the deep merge.
+    assert cfg["sync"]["interval_minutes"] == 15
+    assert cfg["gates"]["REFINEMENT"]["label"] == "qe-gate-1-passed"
+    assert cfg["gates"]["TESTING"]["transition_name"] is None
+
+    events = list(
+        (
+            await session.execute(
+                select(AuditEvent).where(AuditEvent.event_type == "SETTINGS_UPDATED")
+            )
+        ).scalars()
+    )
+    assert len(events) == 1
+    assert events[0].actor == "Honra"
+    assert events[0].payload["before"]["sync"]["enabled"] is False
+    assert events[0].payload["after"]["sync"]["enabled"] is True
+
+
+async def test_unknown_keys_rejected(session):
+    with pytest.raises(ValueError):
+        await settings_service.update_settings(session, {"hacks": {}}, actor="x")
+
+
+async def test_env_summary_never_leaks_secrets():
+    summary = settings_service.env_summary()
+    assert "jira_api_token" not in summary
+    assert isinstance(summary["jira_api_token_set"], bool)
+    assert isinstance(summary["anthropic_api_key_set"], bool)
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_severity.py
+================================================================================
+"""The one calibrated severity scale + its cross-agent ordering."""
+
+from app.services.agents.output_schemas import (
+    SEVERITY_ORDER,
+    Severity,
+    severity_rank,
+)
+from app.services import referee
+
+
+def test_canonical_scale_is_five_levels():
+    assert list(Severity.__args__) == ["BLOCKER", "CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    assert SEVERITY_ORDER == ["LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER"]
+
+
+def test_rank_is_strictly_ordered():
+    ranks = [severity_rank(s) for s in ["LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER"]]
+    assert ranks == sorted(ranks) and len(set(ranks)) == 5
+    assert severity_rank("BLOCKER") > severity_rank("CRITICAL") > severity_rank("HIGH")
+
+
+def test_legacy_defect_aliases_fold_in():
+    # MAJOR/MINOR (the old defect vocabulary) map onto the canonical scale.
+    assert severity_rank("MAJOR") == severity_rank("HIGH")
+    assert severity_rank("MINOR") == severity_rank("LOW")
+
+
+def test_unknown_and_none_are_zero():
+    assert severity_rank(None) == 0
+    assert severity_rank("NONE") == 0
+    assert severity_rank("bogus") == 0
+
+
+class _R:
+    def __init__(self, phase, findings):
+        from app.models import Phase
+        self.phase = Phase.TESTING
+        self.output_json = {
+            "verdict": "WARN", "release_blocking": False,
+            "confidence": {"level": "HIGH"}, "summary": "s", "findings": findings,
+        }
+
+
+def test_referee_worst_finding_severity_across_agents():
+    latest = {
+        "a": _R("t", [{"title": "x", "detail": "y", "severity": "MEDIUM"}]),
+        "b": _R("t", [{"title": "x", "detail": "y", "severity": "CRITICAL"},
+                      {"title": "z", "detail": "w", "severity": "LOW"}]),
+    }
+    h = referee.compute_health(latest)
+    # The single worst finding across both agents, via the unified rank.
+    assert h["worst_finding_severity"] == "CRITICAL"
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_skip.py
+================================================================================
+import pytest
+from sqlalchemy import select
+
+from app.models import GateStatus, Phase, RunStatus, Story
+from app.services import settings_service, workflow
+from app.services.jira import sync_service
+
+
+async def _seed(session, adapter) -> Story:
+    await sync_service.sync_from_jira(session, adapter, actor="test")
+    await session.commit()
+    return (await session.execute(select(Story).where(Story.jira_key == "WLTH-101"))).scalar_one()
+
+
+# ------------------------------------------------------------------ guardrail
+
+
+async def test_cannot_disable_blocking_capable_agent(session):
+    for key in ("financial_data_integrity", "test_execution_analyst"):
+        with pytest.raises(ValueError):
+            await settings_service.update_settings(
+                session, {"agents": {"disabled": [key]}}, actor="test")
+
+
+async def test_cannot_disable_unknown_agent(session):
+    with pytest.raises(ValueError):
+        await settings_service.update_settings(
+            session, {"agents": {"disabled": ["not_a_real_agent"]}}, actor="test")
+
+
+async def test_disable_advisory_agent_is_allowed(session):
+    after = await settings_service.update_settings(
+        session, {"agents": {"disabled": ["security_dast"]}}, actor="test")
+    assert after["agents"]["disabled"] == ["security_dast"]
+    assert await settings_service.disabled_agents(session) == {"security_dast"}
+
+
+# ------------------------------------------------------------------ skip flow
+
+
+async def test_disabled_agent_is_skipped_and_gate_still_ready(session, adapter):
+    # Disable a mid-sequence advisory agent BEFORE the story is bootstrapped.
+    await settings_service.update_settings(
+        session, {"agents": {"disabled": ["three_amigos"]}}, actor="test")
+    await session.commit()
+
+    story = await _seed(session, adapter)
+
+    ta = await workflow.latest_run(session, story.id, "three_amigos")
+    assert ta.status == RunStatus.SKIPPED
+
+    # The five active Refinement agents unlock in sequence, stepping over the
+    # skipped Three Amigos (seq 5) so BDD (seq 6) unlocks after AC Advisor (seq 4).
+    for key in ["story_quality", "fca_regulatory_impact", "consumer_duty_mapper",
+                "compliance_ac_advisor", "bdd_generator"]:
+        run = await workflow.latest_run(session, story.id, key)
+        assert run.status == RunStatus.AWAITING_APPROVAL, f"{key} not unlocked"
+        await workflow.approve_and_run(session, run.id, approver="PO")
+        await workflow.accept_run(session, run.id, actor="PO")
+
+    # Gate is ready even though Three Amigos never ran — SKIPPED counts as done.
+    gate = await workflow.gate_for_phase(session, story.id, Phase.REFINEMENT)
+    assert gate.status == GateStatus.READY_FOR_SIGNOFF
+

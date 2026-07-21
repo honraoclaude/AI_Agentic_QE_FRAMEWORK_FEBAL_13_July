@@ -1,0 +1,312 @@
+### PART 4 of 90 - MIGRATION-FILES-CONTENT split (4 complete files: backend/app/api/gates.py ... backend/app/api/jira.py) ###
+
+================================================================================
+Area: Backend API
+File path: backend/app/api/gates.py
+================================================================================
+import logging
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import Gate, Story
+from ..schemas import GateDecisionRequest, GateOut
+from ..services import settings_service, workflow
+from ..services.jira import push_service
+from ..services.jira.factory import get_adapter
+from ..services.ws import manager
+from .deps import get_session
+
+logger = logging.getLogger("pact.gates")
+
+router = APIRouter(tags=["gates"])
+
+
+async def _broadcast_gate(gate: Gate) -> None:
+    await manager.broadcast(
+        {
+            "type": "gate.status_changed",
+            "gate_id": gate.id,
+            "story_id": gate.story_id,
+            "phase": gate.phase.value,
+            "status": gate.status.value,
+        }
+    )
+
+
+@router.get("/stories/{story_id}/gates", response_model=list[GateOut])
+async def story_gates(story_id: str, session: AsyncSession = Depends(get_session)):
+    gates = (
+        (
+            await session.execute(
+                select(Gate).where(Gate.story_id == story_id).order_by(Gate.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return gates
+
+
+@router.post("/gates/{gate_id}/signoff", response_model=GateOut)
+async def signoff_gate(
+    gate_id: str,
+    body: GateDecisionRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    gate = await workflow.signoff_gate(
+        session, gate_id, body.approver_name, body.approver_role, body.rationale
+    )
+    # Commit the sign-off + its audit events FIRST. This is the
+    # compliance-critical record and must not be lost if the (best-effort)
+    # Jira auto-posts below fail to even enqueue.
+    await session.commit()
+    await _broadcast_gate(gate)
+
+    # Auto-post comment/label/transition/evidence per gate settings — the
+    # sign-off itself is the recorded human approval for these pushes. Any
+    # failure here is isolated: individual send failures land in the retry
+    # queue; a setup failure is logged and the sign-off still stands.
+    push_items = []
+    try:
+        story = await session.get(Story, gate.story_id)
+        app_settings = await settings_service.get_all(session)
+        adapter = await get_adapter(session)
+        push_items = await push_service.handle_gate_signoff(
+            session, adapter, story, gate, app_settings, actor=body.approver_name
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.exception("gate %s: failed to enqueue sign-off pushes", gate.id)
+
+    for item in push_items:
+        await manager.broadcast(
+            {
+                "type": "push.status_changed",
+                "push_id": item.id,
+                "story_id": item.story_id,
+                "push_type": item.push_type.value,
+                "status": item.status.value,
+            }
+        )
+    return gate
+
+
+@router.post("/gates/{gate_id}/reject", response_model=GateOut)
+async def reject_gate(
+    gate_id: str,
+    body: GateDecisionRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    gate = await workflow.reject_gate(
+        session, gate_id, body.approver_name, body.approver_role, body.rationale
+    )
+    await session.commit()
+    await _broadcast_gate(gate)
+    return gate
+
+================================================================================
+Area: Backend API
+File path: backend/app/api/github.py
+================================================================================
+"""GitHub branch connection API.
+
+connect: link a story to owner/repo@branch.
+sync:    pull the branch's changed files (-> METADATA), CI results (-> SARIF /
+         JUNIT / COVERAGE) and changed source (-> GENERIC), stored as artifacts
+         the agents consume. Demo mode uses the offline mock adapter.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import Settings, get_settings
+from ..services.github import service as github_service
+from ..services.github.factory import get_adapter
+from ..services.ws import manager
+from .deps import get_session
+
+router = APIRouter(prefix="/github", tags=["github"])
+
+
+class ConnectRequest(BaseModel):
+    repo: str = Field(min_length=1, max_length=140, description="owner/repo")
+    branch: str = Field(min_length=1, max_length=255)
+    jira_key: str | None = Field(default=None, max_length=32)
+    story_id: str | None = Field(default=None, max_length=64)
+    actor: str = Field(default="unknown", max_length=128)
+
+
+class SyncRequest(BaseModel):
+    jira_key: str | None = Field(default=None, max_length=32)
+    story_id: str | None = Field(default=None, max_length=64)
+    actor: str = Field(default="github-sync", max_length=128)
+
+
+@router.get("/status")
+async def github_status(env: Settings = Depends(get_settings)):
+    return {
+        "ok": env.demo_mode or env.github_configured,
+        "demo_mode": env.demo_mode,
+        "configured": env.github_configured,
+    }
+
+
+@router.post("/connect")
+async def connect(body: ConnectRequest, session: AsyncSession = Depends(get_session)):
+    if not body.jira_key and not body.story_id:
+        raise HTTPException(status_code=422, detail="jira_key or story_id is required")
+    story = await github_service.connect(
+        session, repo=body.repo, branch=body.branch,
+        jira_key=body.jira_key, story_id=body.story_id, actor=body.actor,
+    )
+    await session.commit()
+    return {"story_id": story.id, "jira_key": story.jira_key,
+            "github_repo": story.github_repo, "github_branch": story.github_branch}
+
+
+@router.post("/sync")
+async def sync(
+    body: SyncRequest,
+    session: AsyncSession = Depends(get_session),
+    env: Settings = Depends(get_settings),
+):
+    if not body.jira_key and not body.story_id:
+        raise HTTPException(status_code=422, detail="jira_key or story_id is required")
+    story = await github_service._resolve_story(
+        session, jira_key=body.jira_key, story_id=body.story_id
+    )
+    adapter = get_adapter(env)
+    stored = await github_service.sync(session, adapter, story=story, actor=body.actor)
+    await session.commit()
+    for a in stored:
+        await manager.broadcast(
+            {"type": "artifact.uploaded", "story_id": story.id, "artifact_id": a.id}
+        )
+    return {
+        "story_id": story.id,
+        "jira_key": story.jira_key,
+        "repo": story.github_repo,
+        "branch": story.github_branch,
+        "ingested": [{"artifact_id": a.id, "kind": a.kind.value, "summary": a.summary} for a in stored],
+    }
+
+================================================================================
+Area: Backend API
+File path: backend/app/api/insights.py
+================================================================================
+"""Agent-performance / human-feedback insights."""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+
+from ..services import agent_health, feedback, flaky_intel
+from .deps import get_session
+
+router = APIRouter(prefix="/insights", tags=["insights"])
+
+
+class QuarantineRequest(BaseModel):
+    actor: str = Field(min_length=1, max_length=128)
+    owner: str = Field(min_length=1, max_length=128)
+    expiry_days: int = Field(ge=1, le=90)
+    note: str = Field(default="", max_length=2000)
+
+
+class ClearRequest(BaseModel):
+    actor: str = Field(min_length=1, max_length=128)
+    note: str = Field(default="", max_length=2000)
+
+
+@router.get("/agents")
+async def agent_insights(session: AsyncSession = Depends(get_session)):
+    """Per-agent human-feedback analytics: accept / reject / re-run rates, a
+    derived trust score, verdict distribution, reject reasons and re-run guidance
+    — plus the agents attracting the most human pushback."""
+    return await feedback.agent_performance(session)
+
+
+@router.get("/agent-health")
+async def operational_health(session: AsyncSession = Depends(get_session)):
+    """Operational (SRE) health of the agent fleet: failure rates, latency,
+    token spend, per-prompt-version reliability, and threshold alerts.
+    Deterministic aggregation — no model calls."""
+    return await agent_health.compute(session)
+
+
+@router.get("/flaky-tests")
+async def flaky_ledger(session: AsyncSession = Depends(get_session)):
+    """Flaky-Test Intelligence: cross-run failure signatures with flake
+    scores, and the owned/expiring quarantine list."""
+    return await flaky_intel.ledger(session)
+
+
+@router.post("/flaky-tests/{sig_id}/quarantine")
+async def quarantine_signature(
+    sig_id: str, body: QuarantineRequest, session: AsyncSession = Depends(get_session)
+):
+    """Quarantine a flaky signature — owner + expiry (1-90 days) mandatory."""
+    try:
+        result = await flaky_intel.quarantine(
+            session, sig_id, body.actor, body.owner, body.expiry_days, body.note
+        )
+    except flaky_intel.FlakyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await session.commit()
+    return result
+
+
+@router.post("/flaky-tests/{sig_id}/clear")
+async def clear_signature(
+    sig_id: str, body: ClearRequest, session: AsyncSession = Depends(get_session)
+):
+    """Stop tracking: the flakiness is fixed or the signature was wrong."""
+    try:
+        result = await flaky_intel.clear(session, sig_id, body.actor, body.note)
+    except flaky_intel.FlakyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await session.commit()
+    return result
+
+================================================================================
+Area: Backend API
+File path: backend/app/api/jira.py
+================================================================================
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..schemas import SyncRequest, SyncResultOut
+from ..services.jira import sync_service
+from ..services.jira.factory import get_adapter
+from ..services.ws import manager
+from .deps import get_session
+
+router = APIRouter(prefix="/jira", tags=["jira"])
+
+
+@router.post("/sync", response_model=SyncResultOut)
+async def sync_from_jira(
+    body: SyncRequest, session: AsyncSession = Depends(get_session)
+):
+    """Manual 'Sync from Jira'. Pulls stories matching the configured JQL
+    (or the override in the request body) and returns counts for the toast."""
+    adapter = await get_adapter(session)
+    result = await sync_service.sync_from_jira(
+        session, adapter, actor=body.actor or "system", jql=body.jql
+    )
+    await session.commit()
+    await manager.broadcast({"type": "sync.completed", **result.as_dict()})
+    return result.as_dict()
+
+
+@router.post("/test-connection")
+async def test_connection(session: AsyncSession = Depends(get_session)):
+    adapter = await get_adapter(session)
+    return await adapter.test_connection()
+

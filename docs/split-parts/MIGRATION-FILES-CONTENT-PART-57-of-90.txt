@@ -1,0 +1,224 @@
+### PART 57 of 90 - MIGRATION-FILES-CONTENT split (2 complete files: backend/tests/test_referee.py ... backend/tests/test_refinement_regulatory.py) ###
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_referee.py
+================================================================================
+from sqlalchemy import select
+
+from app.models import Phase, Story
+from app.services import referee, workflow
+from app.services.agents.registry import agents_for_phase
+from app.services.jira import sync_service
+
+
+class _R:
+    """Lightweight stand-in for AgentRun (referee reads output_json / phase / key)."""
+
+    def __init__(self, phase, output):
+        self.phase = phase
+        self.output_json = output
+
+
+def _run(verdict="PASS", conf="HIGH", blocking=False, phase=Phase.TESTING, **extra):
+    out = {"verdict": verdict, "confidence": {"level": conf, "rationale": "x", "caveats": []},
+           "release_blocking": blocking, "summary": "s", **extra}
+    return _R(phase, out)
+
+
+# ------------------------------------------------------------------ health index
+
+
+def test_health_healthy_when_all_pass():
+    latest = {"a": _run("PASS"), "b": _run("PASS"), "c": _run("PASS")}
+    h = referee.compute_health(latest)
+    assert h["score"] == 100 and h["band"] == "HEALTHY"
+    assert h["counts"]["pass"] == 3
+
+
+def test_health_at_risk_on_warns():
+    latest = {"a": _run("WARN"), "b": _run("WARN"), "c": _run("PASS")}
+    h = referee.compute_health(latest)
+    assert h["band"] in ("AT_RISK", "HEALTHY")
+    assert 55 <= h["score"] < 100
+
+
+def test_blocker_forces_blocked_band():
+    latest = {"a": _run("PASS"), "fin": _run("FAIL", blocking=True)}
+    h = referee.compute_health(latest)
+    assert h["band"] == "BLOCKED" and h["score"] <= 30
+    assert h["blockers"] and h["blockers"][0]["summary"] is not None
+
+
+def test_low_confidence_lowers_assurance():
+    latest = {"a": _run("PASS", conf="LOW"), "b": _run("PASS", conf="LOW")}
+    h = referee.compute_health(latest)
+    assert h["assurance"] == "LOW"
+    assert h["least_confident"] and len(h["least_confident"]) == 2
+
+
+# ------------------------------------------------------------------ referee
+
+
+def test_inconsistency_financial_vs_go():
+    latest = {
+        "financial_data_integrity": _run("FAIL", blocking=True),
+        "deployment_risk": _run("PASS", recommendation="GO"),
+    }
+    issues = referee.find_inconsistencies(latest)
+    assert any(i["rule"] == "financial_vs_go" and i["severity"] == "HIGH" for i in issues)
+
+
+def test_inconsistency_deployable_vs_coverage():
+    latest = {
+        "apex_coverage": _run("FAIL", deployable=False, gate_passed=False),
+        "deployability_validation": _run("PASS", deployable=True),
+    }
+    issues = referee.find_inconsistencies(latest)
+    assert any(i["rule"] == "deployable_vs_coverage" for i in issues)
+
+
+def test_inconsistency_low_confidence_blocker():
+    latest = {"test_execution_analyst": _run("FAIL", conf="LOW", blocking=True)}
+    issues = referee.find_inconsistencies(latest)
+    assert any(i["rule"] == "low_confidence_blocker" for i in issues)
+
+
+def test_no_inconsistencies_when_consistent():
+    latest = {"a": _run("PASS"), "b": _run("PASS")}
+    assert referee.find_inconsistencies(latest) == []
+
+
+# ------------------------------------------------------------------ integration
+
+
+async def _seed(session, adapter) -> Story:
+    await sync_service.sync_from_jira(session, adapter, actor="test")
+    await session.commit()
+    return (await session.execute(select(Story).where(Story.jira_key == "WLTH-101"))).scalar_one()
+
+
+async def test_assess_over_real_runs(session, adapter):
+    story = await _seed(session, adapter)
+    # Run + accept the whole Refinement phase to create real output_json rows.
+    for agent in agents_for_phase(Phase.REFINEMENT):
+        run = await workflow.latest_run(session, story.id, agent.key)
+        await workflow.approve_and_run(session, run.id, approver="PO")
+        await workflow.accept_run(session, run.id, actor="PO")
+    await session.commit()
+
+    h = await referee.assess(session, story.id)
+    assert h["agents_evaluated"] == 6
+    assert h["score"] is not None and h["band"] in ("HEALTHY", "AT_RISK", "CRITICAL", "BLOCKED")
+    assert "inconsistencies" in h and isinstance(h["inconsistency_count"], int)
+    assert any(p["phase"] == "REFINEMENT" for p in h["phase_breakdown"])
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_refinement_regulatory.py
+================================================================================
+"""Refinement regulatory agents: FCA Impact, Consumer Duty, Compliance AC Advisor.
+
+They behave like the other Refinement agents — advisory, non-blocking, chained.
+"""
+
+from app.models import AGENT_UPSTREAM_INPUTS, Phase
+from app.services.agents.demo_outputs import GENERATORS, build
+from app.services.agents.output_schemas import (
+    OUTPUT_SCHEMAS,
+    ComplianceAcAdvisorOutput,
+    ConsumerDutyOutput,
+    FcaRegulatoryImpactOutput,
+)
+from app.services.agents.registry import agents_for_phase
+
+
+def _story():
+    """Minimal stand-in exposing the fields the demo generators read."""
+
+    class _S:
+        jira_key = "WLTH-101"
+        summary = "Household rollup recalculates client-facing balance"
+        acceptance_criteria = ["Rollup sums active accounts", "Closed accounts excluded"]
+        fca_impact = None
+        cloud = None
+
+    return _S()
+
+
+# ------------------------------------------------------------------ registry
+
+
+def test_refinement_has_six_agents_in_order():
+    seq = [a.key for a in agents_for_phase(Phase.REFINEMENT)]
+    assert seq == [
+        "story_quality",
+        "fca_regulatory_impact",
+        "consumer_duty_mapper",
+        "compliance_ac_advisor",
+        "three_amigos",
+        "bdd_generator",
+    ]
+
+
+def test_regulatory_agents_registered_everywhere():
+    for key in ("fca_regulatory_impact", "consumer_duty_mapper", "compliance_ac_advisor"):
+        assert key in OUTPUT_SCHEMAS
+        assert key in GENERATORS
+    # AC Advisor feeds BDD so its criteria reach the @fca scenarios.
+    assert "compliance_ac_advisor" in AGENT_UPSTREAM_INPUTS["bdd_generator"]
+
+
+# ------------------------------------------------------------------ outputs
+
+
+def test_fca_regulatory_impact_output_valid_and_nonblocking():
+    story = _story()
+    body = build("fca_regulatory_impact", story, None, artifacts=[], upstream=[])
+    parsed = FcaRegulatoryImpactOutput.model_validate(body)
+    assert parsed.proposed_fca_impact in ("LOW", "MEDIUM", "HIGH")
+    assert parsed.applicable_regulations
+    assert any(r.area == "PRIN" for r in parsed.applicable_regulations)  # Consumer Duty
+    assert parsed.release_blocking is False
+
+
+def test_consumer_duty_maps_all_four_outcomes():
+    story = _story()
+    fca = build("fca_regulatory_impact", story, None, artifacts=[], upstream=[])
+    upstream = [{"agent_key": "fca_regulatory_impact", "agent_name": "FCA", "output": fca}]
+    body = build("consumer_duty_mapper", story, None, artifacts=[], upstream=upstream)
+    parsed = ConsumerDutyOutput.model_validate(body)
+    outcomes = {o.outcome for o in parsed.outcomes}
+    assert outcomes == {
+        "PRODUCTS_AND_SERVICES",
+        "PRICE_AND_VALUE",
+        "CONSUMER_UNDERSTANDING",
+        "CONSUMER_SUPPORT",
+    }
+    assert parsed.unaddressed_count == sum(
+        1 for o in parsed.outcomes if o.status == "NOT_ADDRESSED"
+    )
+    assert parsed.release_blocking is False
+
+
+def test_ac_advisor_consumes_duty_gaps_and_proposes_musts():
+    story = _story()
+    fca = build("fca_regulatory_impact", story, None, artifacts=[], upstream=[])
+    duty = build(
+        "consumer_duty_mapper", story, None, artifacts=[],
+        upstream=[{"agent_key": "fca_regulatory_impact", "agent_name": "FCA", "output": fca}],
+    )
+    upstream = [
+        {"agent_key": "fca_regulatory_impact", "agent_name": "FCA", "output": fca},
+        {"agent_key": "consumer_duty_mapper", "agent_name": "CD", "output": duty},
+    ]
+    body = build("compliance_ac_advisor", story, None, artifacts=[], upstream=upstream)
+    parsed = ComplianceAcAdvisorOutput.model_validate(body)
+    assert parsed.suggested_criteria
+    assert any(c.priority == "MUST" for c in parsed.suggested_criteria)
+    assert any(c.regulatory_basis for c in parsed.suggested_criteria)
+    # coverage_gaps should reflect the Consumer Duty gaps chained in from upstream.
+    duty_gaps = [o.get("gap") for o in duty["outcomes"] if o.get("gap")]
+    assert parsed.coverage_gaps == duty_gaps
+    assert parsed.release_blocking is False
+

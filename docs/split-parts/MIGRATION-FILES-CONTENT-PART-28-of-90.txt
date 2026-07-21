@@ -1,0 +1,172 @@
+### PART 28 of 90 - MIGRATION-FILES-CONTENT split (1 complete files: backend/app/services/jira/rest_adapter.py ... backend/app/services/jira/rest_adapter.py) ###
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/jira/rest_adapter.py
+================================================================================
+"""Real Jira Cloud REST API v3 adapter.
+
+Auth: email + API token from .env (basic auth). Uses the current
+/rest/api/3/search/jql endpoint with nextPageToken pagination (the legacy
+/search endpoint is deprecated). Transition IDs are always resolved
+dynamically per issue — never hardcoded.
+"""
+
+import httpx
+
+from ...config import Settings
+from .adapter import JiraAdapter, JiraStoryData
+from .field_mapping import DEFAULT_FIELD_MAPPINGS, fields_param, parse_issue
+
+
+class JiraApiError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        super().__init__(f"Jira API error {status_code}: {message}")
+
+
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+    return _shared_client
+
+
+class RestJiraAdapter(JiraAdapter):
+    def __init__(
+        self,
+        env: Settings,
+        jira_config: dict | None = None,
+        field_mappings: dict | None = None,
+        client: httpx.AsyncClient | None = None,
+    ):
+        if not env.jira_configured:
+            raise ValueError(
+                "Jira is not configured: set JIRA_BASE_URL, JIRA_EMAIL and "
+                "JIRA_API_TOKEN in .env"
+            )
+        self._base = env.jira_base_url.rstrip("/")
+        self._auth = (env.jira_email, env.jira_api_token)
+        self._config = jira_config or {}
+        self._mapping = field_mappings or DEFAULT_FIELD_MAPPINGS
+        self._client = client or _get_shared_client()
+        self._project_key = self._config.get("project_key") or env.jira_project_key
+        self._jql_override = self._config.get("jql_override") or env.jira_jql_override
+
+    # ------------------------------------------------------------ plumbing
+
+    async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        response = await self._client.request(
+            method, f"{self._base}{path}", auth=self._auth, **kwargs
+        )
+        if response.status_code >= 400:
+            raise JiraApiError(response.status_code, response.text[:500])
+        return response
+
+    def default_jql(self) -> str:
+        if self._jql_override:
+            return self._jql_override
+        return (
+            f'project = "{self._project_key}" AND issuetype = Story '
+            "AND sprint in openSprints() ORDER BY rank"
+        )
+
+    # ---------------------------------------------------------------- pull
+
+    async def test_connection(self) -> dict:
+        try:
+            response = await self._request("GET", "/rest/api/3/myself")
+        except JiraApiError as exc:
+            return {"ok": False, "error": str(exc)}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": f"connection failed: {exc}"}
+        me = response.json()
+        return {
+            "ok": True,
+            "mode": "live",
+            "user": me.get("displayName"),
+            "account_id": me.get("accountId"),
+            "base_url": self._base,
+            "default_jql": self.default_jql(),
+        }
+
+    async def fetch_stories(self, jql: str | None = None) -> list[JiraStoryData]:
+        jql = jql or self.default_jql()
+        fields = ",".join(fields_param(self._mapping))
+        stories: list[JiraStoryData] = []
+        next_page_token: str | None = None
+        while True:
+            params: dict = {"jql": jql, "maxResults": 100, "fields": fields}
+            if next_page_token:
+                params["nextPageToken"] = next_page_token
+            response = await self._request(
+                "GET", "/rest/api/3/search/jql", params=params
+            )
+            data = response.json()
+            for issue in data.get("issues", []):
+                stories.append(parse_issue(issue, self._mapping))
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+        return stories
+
+    async def fetch_story(self, key: str) -> JiraStoryData | None:
+        try:
+            response = await self._request(
+                "GET",
+                f"/rest/api/3/issue/{key}",
+                params={"fields": ",".join(fields_param(self._mapping))},
+            )
+        except JiraApiError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return parse_issue(response.json(), self._mapping)
+
+    # ---------------------------------------------------------------- push
+
+    async def add_comment(self, key: str, adf_body: dict) -> dict:
+        response = await self._request(
+            "POST", f"/rest/api/3/issue/{key}/comment", json={"body": adf_body}
+        )
+        return {"ok": True, "comment_id": response.json().get("id")}
+
+    async def add_label(self, key: str, label: str) -> dict:
+        await self._request(
+            "PUT",
+            f"/rest/api/3/issue/{key}",
+            json={"update": {"labels": [{"add": label}]}},
+        )
+        return {"ok": True, "label": label}
+
+    async def get_transitions(self, key: str) -> list[dict]:
+        response = await self._request("GET", f"/rest/api/3/issue/{key}/transitions")
+        return [
+            {"id": t["id"], "name": t["name"]}
+            for t in response.json().get("transitions", [])
+        ]
+
+    async def transition_issue(self, key: str, transition_id: str) -> dict:
+        await self._request(
+            "POST",
+            f"/rest/api/3/issue/{key}/transitions",
+            json={"transition": {"id": transition_id}},
+        )
+        return {"ok": True, "transition_id": transition_id}
+
+    async def attach_file(self, key: str, filename: str, content: bytes) -> dict:
+        response = await self._request(
+            "POST",
+            f"/rest/api/3/issue/{key}/attachments",
+            headers={"X-Atlassian-Token": "no-check"},
+            files={"file": (filename, content, "application/json")},
+        )
+        attachments = response.json()
+        return {
+            "ok": True,
+            "attachment_id": attachments[0].get("id") if attachments else None,
+        }
+

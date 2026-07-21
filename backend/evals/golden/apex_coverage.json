@@ -1,0 +1,77 @@
+{
+  "agent": "apex_coverage",
+  "description": "Per-class coverage vs the 85% policy and 75% deploy floor. Verdict and gate_passed are DELIBERATELY independent signals — a class can fail policy (verdict FAIL) while still meeting the looser new-code gate (gate_passed true), and vice versa.",
+  "cases": [
+    {
+      "name": "no_artifact_default_estimate_fails_policy_but_gate_passes",
+      "labelled_by": "QE lead — the illustrative default has a financial class below the 85% policy (verdict FAIL) but both classes clear the 80% new-code floor (gate_passed true) — these must not be conflated",
+      "story": { "jira_key": "EVAL-AX-1", "summary": "Household rollup", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "deployable", "equals": true },
+        { "path": "gate_passed", "equals": true },
+        { "path": "threshold_met", "equals": false },
+        { "path": "classes.0.assertion_risk", "equals": "HIGH" },
+        { "path": "findings", "min_len": 2 }
+      ]
+    },
+    {
+      "name": "clean_non_financial_class_passes",
+      "labelled_by": "QE lead — a well-covered non-financial class with no gaps passes cleanly",
+      "story": { "jira_key": "EVAL-AX-2", "summary": "Portal auth", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "COVERAGE", "filename": "cov.json", "summary": "clean", "parsed": {
+          "classes": [{"name": "PortalAuthHandler", "coverage_percent": 95.0}],
+          "overall_percent": 95.0
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "PASS" },
+        { "path": "deployable", "equals": true },
+        { "path": "threshold_met", "equals": true },
+        { "path": "gate_passed", "equals": true },
+        { "path": "classes.0.financial_critical", "equals": false },
+        { "path": "findings", "equals": [] }
+      ]
+    },
+    {
+      "name": "financial_class_well_below_policy_blocks",
+      "labelled_by": "Compliance officer — a financial-critical class at 60% is both a policy failure and a deploy-floor breach",
+      "story": { "jira_key": "EVAL-AX-3", "summary": "Household rollup", "acceptance_criteria": ["x"], "fca_impact": "HIGH", "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "COVERAGE", "filename": "cov.json", "summary": "low coverage", "parsed": {
+          "classes": [{"name": "HouseholdRollupService", "coverage_percent": 60.0}],
+          "overall_percent": 60.0
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "deployable", "equals": false },
+        { "path": "gate_passed", "equals": false },
+        { "path": "classes.0.meets_threshold", "equals": false },
+        { "path": "classes.0.assertion_risk", "equals": "HIGH" },
+        { "path": "findings", "min_len": 2 },
+        { "path": "drafted_tests", "min_len": 4 }
+      ]
+    },
+    {
+      "name": "deploy_floor_breach_without_financial_risk_still_blocks_with_no_findings",
+      "labelled_by": "QE lead — a non-financial class can still breach the deploy floor; findings stays empty because the findings list only reports FINANCIAL-specific risk, not the deploy-floor breach itself — verdict is not fully explained by findings alone",
+      "story": { "jira_key": "EVAL-AX-4", "summary": "Portal auth", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "COVERAGE", "filename": "cov.json", "summary": "low coverage", "parsed": {
+          "classes": [{"name": "PortalAuthHandler", "coverage_percent": 50.0}],
+          "overall_percent": 50.0
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "deployable", "equals": false },
+        { "path": "gate_passed", "equals": false },
+        { "path": "classes.0.financial_critical", "equals": false },
+        { "path": "findings", "equals": [] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+### PART 77 of 90 - MIGRATION-FILES-CONTENT split (1 complete files: frontend/src/components/RiskRegisterView.tsx ... frontend/src/components/RiskRegisterView.tsx) ###
+
+================================================================================
+Area: Frontend source
+File path: frontend/src/components/RiskRegisterView.tsx
+================================================================================
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "../api";
+import type { RiskEntry } from "../types";
+import { Badge, Button, useToast } from "../ui";
+
+/** Risk Acceptance Register — the quality-debt ledger. Every knowingly-
+ *  accepted risk (run accepted despite findings, gate signed over WARNs,
+ *  CONDITIONAL_GO) as a managed position: owner, rationale, severity-derived
+ *  review-by date, OPEN → REVIEWED → CLOSED. Overdue entries escalate red. */
+
+const SEV_CLS: Record<string, string> = {
+  BLOCKER: "border-bad/70 bg-bad/20 text-bad font-bold",
+  CRITICAL: "border-bad/50 bg-bad/10 text-bad",
+  HIGH: "border-bad/40 bg-bad/5 text-bad",
+  MEDIUM: "border-warn/50 bg-warn/10 text-warn",
+  LOW: "border-line text-ink-dim",
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  RUN_ACCEPTED_WITH_FINDINGS: "run accepted despite findings",
+  GATE_SIGNED_OVER_WARN: "gate signed over WARN",
+  CONDITIONAL_GO: "conditional go",
+};
+
+export function RiskRegisterView({ actor }: { actor: string }) {
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [action, setAction] = useState<{ entry: RiskEntry; kind: "review" | "close" } | null>(null);
+  const [note, setNote] = useState("");
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const q = useQuery({
+    queryKey: ["risk-register"],
+    queryFn: () => api.riskRegister(),
+  });
+
+  const act = useMutation({
+    mutationFn: () =>
+      action!.kind === "review"
+        ? api.reviewRisk(action!.entry.id, actor, note)
+        : api.closeRisk(action!.entry.id, actor, note),
+    onSuccess: () => {
+      toast("ok", action!.kind === "review"
+        ? "Risk re-affirmed — review window restarted."
+        : "Risk closed.");
+      setAction(null);
+      setNote("");
+      queryClient.invalidateQueries({ queryKey: ["risk-register"] });
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+
+  const data = q.data;
+  if (q.isLoading) return <div className="p-6 text-sm text-ink-faint">Loading…</div>;
+  if (!data) return <div className="p-6 text-sm text-ink-faint">No data.</div>;
+
+  const entries = statusFilter
+    ? data.entries.filter((e) => e.status === statusFilter)
+    : data.entries;
+  const s = data.summary;
+
+  return (
+    <div className="mx-auto max-w-6xl p-6">
+      <h2 className="mb-1 text-sm font-semibold text-ink">Risk Acceptance Register</h2>
+      <p className="mb-4 text-[11px] text-ink-dim">
+        The quality-debt ledger: every risk a human knowingly accepted — with owner,
+        rationale and a severity-derived review date. Sign-offs are managed positions,
+        not terminal events.
+      </p>
+
+      <div className="mb-4 grid grid-cols-4 gap-3">
+        {[
+          ["Total entries", String(s.total), ""],
+          ["Open", String(s.open), s.open > 0 ? "text-warn" : ""],
+          ["Overdue for review", String(s.overdue), s.overdue > 0 ? "text-bad" : ""],
+          [
+            "Open by severity",
+            Object.entries(s.by_severity).map(([k, v]) => `${k[0]}:${v}`).join(" ") || "—",
+            "",
+          ],
+        ].map(([label, val, cls]) => (
+          <div key={label} className="rounded-lg border border-line bg-panel p-3">
+            <div className={`text-lg font-bold ${cls || "text-ink"}`}>{val}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mb-3 flex gap-1">
+        {["", "OPEN", "REVIEWED", "CLOSED"].map((f) => (
+          <button
+            key={f}
+            onClick={() => setStatusFilter(f)}
+            className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+              statusFilter === f ? "bg-accent/15 text-accent" : "text-ink-dim hover:bg-panel-2"
+            }`}
+          >
+            {f || "All"}
+          </button>
+        ))}
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+          No accepted risks on record — nothing has been signed over findings.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {entries.map((e) => (
+            <div
+              key={e.id}
+              className={`rounded-lg border bg-panel p-3 ${
+                e.overdue ? "border-bad/60" : "border-line"
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge className={SEV_CLS[e.severity] ?? "border-line text-ink-dim"}>
+                  {e.severity}
+                </Badge>
+                <span className="font-mono text-[10px] text-accent">{e.jira_key}</span>
+                <span className="text-xs font-medium text-ink">{e.title}</span>
+                {e.overdue && (
+                  <Badge className="border-bad/70 bg-bad/20 font-bold text-bad">
+                    OVERDUE
+                  </Badge>
+                )}
+                <Badge
+                  className={
+                    e.status === "CLOSED"
+                      ? "border-line text-ink-faint"
+                      : e.status === "REVIEWED"
+                        ? "border-ok/40 text-ok"
+                        : "border-warn/40 text-warn"
+                  }
+                >
+                  {e.status}
+                </Badge>
+                <span className="ml-auto font-mono text-[10px] text-ink-faint">
+                  {SOURCE_LABEL[e.source] ?? e.source} · review by{" "}
+                  {(e.review_by ?? "").slice(0, 10)}
+                </span>
+              </div>
+              {e.detail && <div className="mt-1 text-[11px] text-ink-dim">{e.detail}</div>}
+              <div className="mt-1 text-[10px] text-ink-faint">
+                Accepted by <b>{e.accepted_by}</b>
+                {e.rationale && <> — “{e.rationale}”</>}
+                {e.reviewed_by && (
+                  <> · re-affirmed by {e.reviewed_by} {e.review_note && `(“${e.review_note}”)`}</>
+                )}
+                {e.closed_by && (
+                  <> · closed by {e.closed_by} {e.closure_note && `(“${e.closure_note}”)`}</>
+                )}
+              </div>
+
+              {e.status !== "CLOSED" && (
+                <div className="mt-2 flex gap-2">
+                  {action?.entry.id === e.id ? (
+                    <div className="flex w-full flex-wrap items-center gap-2">
+                      <input
+                        value={note}
+                        onChange={(ev) => setNote(ev.target.value)}
+                        placeholder={
+                          action.kind === "review"
+                            ? "Why is this still acceptable?"
+                            : "Why does this risk no longer exist?"
+                        }
+                        className="min-w-[280px] flex-1 rounded border border-line bg-bg px-2 py-1 text-[11px] text-ink"
+                      />
+                      <Button
+                        variant={action.kind === "review" ? "primary" : "ok"}
+                        busy={act.isPending}
+                        onClick={() => {
+                          if (!actor.trim()) {
+                            toast("error", "Enter your name in the header first.");
+                            return;
+                          }
+                          act.mutate();
+                        }}
+                      >
+                        {action.kind === "review" ? "Re-affirm" : "Close risk"}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setAction(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button onClick={() => { setAction({ entry: e, kind: "review" }); setNote(""); }}>
+                        ↻ Review (re-affirm)
+                      </Button>
+                      <Button variant="ghost" onClick={() => { setAction({ entry: e, kind: "close" }); setNote(""); }}>
+                        ✓ Close…
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+

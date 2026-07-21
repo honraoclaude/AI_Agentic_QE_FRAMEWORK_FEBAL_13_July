@@ -1,0 +1,243 @@
+### PART 12 of 90 - MIGRATION-FILES-CONTENT split (1 complete files: backend/app/services/agents/engine.py ... backend/app/services/agents/engine.py) ###
+
+================================================================================
+Area: Backend agents core
+File path: backend/app/services/agents/engine.py
+================================================================================
+"""Agent execution engine — Claude API integration.
+
+Each execution: versioned system prompt (file registry) + story context +
+optional human re-run guidance -> structured JSON output validated against
+the agent's schema. Release-blocking rules for the FCA-scenario and
+financial-data-integrity agents are re-enforced server-side after the model
+responds — the model cannot un-block a release, and neither can a prompt.
+
+Falls back to a deterministic stub when no ANTHROPIC_API_KEY is configured,
+so demo mode works without credentials. The workflow layer records agent
+name, prompt version, model, token usage and input/output hashes on every
+run (non-negotiable #5).
+"""
+
+import json
+
+from anthropic import AsyncAnthropic
+
+from ...config import get_settings
+from ...models import AgentRun, Story
+from ...util import canonical_json, sha256_hex
+from . import demo_outputs
+from .output_schemas import OUTPUT_SCHEMAS, AgentOutputBase
+from .prompts import load_prompt
+from .registry import AgentDefinition
+
+MAX_TOKENS = 8192
+
+_client: AsyncAnthropic | None = None
+
+
+def _get_client() -> AsyncAnthropic:
+    global _client
+    if _client is None:
+        _client = AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+    return _client
+
+
+# ------------------------------------------------------------- construction
+
+
+def _story_context(story: Story) -> dict:
+    return {
+        "jira_key": story.jira_key,
+        "summary": story.summary,
+        "description": story.description,
+        "acceptance_criteria": story.acceptance_criteria,
+        "story_points": story.story_points,
+        "sprint": story.sprint,
+        "labels": story.labels,
+        "priority": story.priority,
+        "fca_impact": story.fca_impact.value if story.fca_impact else None,
+        "fca_impact_confirmed": story.fca_impact_confirmed,
+        "cloud": story.cloud.value if story.cloud else None,
+        "current_phase": story.current_phase.value,
+    }
+
+
+def _build_user_message(
+    story_ctx: dict,
+    guidance: str | None,
+    attempt: int,
+    artifacts: list[dict] | None,
+    upstream: list[dict] | None = None,
+) -> str:
+    parts = [
+        "Analyse the following user story and respond in the required "
+        "structured format.",
+        "",
+        "<story>",
+        json.dumps(story_ctx, indent=2, default=str),
+        "</story>",
+    ]
+    if artifacts:
+        parts += ["", "<artifacts>", json.dumps(artifacts, indent=2, default=str), "</artifacts>"]
+    else:
+        parts += ["", "<artifacts>none provided</artifacts>"]
+    # Accepted output of upstream agents this agent builds on.
+    if upstream:
+        parts += [
+            "",
+            "<upstream_context>",
+            json.dumps(upstream, indent=2, default=str),
+            "</upstream_context>",
+        ]
+    if guidance:
+        parts += [
+            "",
+            "<reviewer_guidance>",
+            guidance,
+            "</reviewer_guidance>",
+            "",
+            f"This is re-run attempt {attempt}. A human reviewer requested it "
+            "with the guidance above — address it directly and say in your "
+            "summary how you did.",
+        ]
+    return "\n".join(parts)
+
+
+# ------------------------------------------------------------------ calling
+
+
+async def _call_claude(
+    model: str, system_prompt: str, user_text: str, schema: type[AgentOutputBase]
+) -> tuple[AgentOutputBase, dict]:
+    """One structured-output call. Isolated so tests can substitute it."""
+    client = _get_client()
+    response = await client.messages.parse(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        thinking={"type": "adaptive"},
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_text}],
+        output_format=schema,
+    )
+    if response.parsed_output is None:
+        raise RuntimeError(
+            f"structured output missing (stop_reason={response.stop_reason})"
+        )
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+    return response.parsed_output, usage
+
+
+# ------------------------------------------------- server-side blocking rules
+
+
+def _enforce_blocking_rules(agent_key: str, output: dict) -> dict:
+    """FCA-scenario and financial-integrity failures are ALWAYS
+    release-blocking. Applied after the model responds; there is no override
+    path in prompt, model output, or API."""
+    if agent_key == "financial_data_integrity":
+        failed = [c for c in output.get("checks", []) if not c.get("passed")]
+        # Missing financial evidence (a criterion never validated) blocks too.
+        not_validated = output.get("not_validated", [])
+        if failed or not_validated:
+            output["release_blocking"] = True
+            output["verdict"] = "FAIL"
+    elif agent_key == "test_execution_analyst":
+        fca_failures = [
+            f for f in output.get("failures", []) if f.get("is_fca_scenario")
+        ]
+        # Missing FCA evidence (a tagged scenario that never ran) blocks too —
+        # Gate 3 needs FCA scenarios executed, not merely "no failures".
+        unexecuted_fca = output.get("unexecuted_fca_scenarios", [])
+        if fca_failures or unexecuted_fca:
+            output["release_blocking"] = True
+            output["verdict"] = "FAIL"
+    return output
+
+
+# ---------------------------------------------------------------- execution
+
+
+async def execute(
+    run: AgentRun,
+    story: Story,
+    agent: AgentDefinition,
+    guidance: str | None = None,
+    artifacts: list[dict] | None = None,
+    upstream: list[dict] | None = None,
+) -> dict:
+    """Execute one agent against one story. Returns the structured result the
+    workflow layer persists: output, input, hashes, model, usage.
+
+    `artifacts` is the list of parsed CI/CD artifacts this agent consumes;
+    `upstream` is the accepted output of upstream agents it builds on (e.g.
+    BDD consumes the Three Amigos example map). Both feed the real prompt and
+    the demo fixtures.
+    """
+    settings = get_settings()
+    artifacts = artifacts or []
+    upstream = upstream or []
+    story_ctx = _story_context(story)
+    input_payload = {
+        "agent": agent.key,
+        "agent_name": agent.name,
+        "prompt_version": agent.prompt_version,
+        "attempt": run.attempt,
+        "model_role": agent.model_role,
+        "story": story_ctx,
+        "guidance": guidance,
+        "artifacts": [
+            {"kind": a["kind"], "filename": a["filename"], "summary": a["summary"]}
+            for a in artifacts
+        ],
+        "upstream": [
+            {"agent_key": u["agent_key"], "agent_name": u["agent_name"]}
+            for u in upstream
+        ],
+    }
+
+    if not settings.anthropic_api_key:
+        # Demo path: rich, story-tailored fixture output (labelled clearly).
+        body = demo_outputs.build(agent.key, story, guidance, artifacts, upstream)
+        model_used = "demo-fixture"
+        usage = {"input_tokens": 0, "output_tokens": 0}
+    else:
+        system_prompt = load_prompt(agent.key, agent.prompt_version)
+        model_used = (
+            settings.classification_model
+            if agent.model_role == "classification"
+            else settings.reasoning_model
+        )
+        user_text = _build_user_message(
+            story_ctx,
+            guidance,
+            run.attempt,
+            artifacts=artifacts or None,
+            upstream=upstream or None,
+        )
+        input_payload["rendered_prompt"] = user_text
+        parsed, usage = await _call_claude(
+            model_used, system_prompt, user_text, OUTPUT_SCHEMAS[agent.key]
+        )
+        body = parsed.model_dump()
+
+    output = {
+        "agent": agent.key,
+        "agent_name": agent.name,
+        "pact": list(agent.pact),
+        **body,
+        "guidance_applied": guidance,
+    }
+    output = _enforce_blocking_rules(agent.key, output)
+
+    return {
+        "output": output,
+        "input": input_payload,
+        "output_hash": sha256_hex(canonical_json(output)),
+        "input_hash": sha256_hex(canonical_json(input_payload)),
+        "model": model_used,
+        "token_usage": usage,
+    }
+

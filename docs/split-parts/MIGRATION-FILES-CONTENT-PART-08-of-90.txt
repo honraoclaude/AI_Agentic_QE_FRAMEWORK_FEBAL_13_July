@@ -1,0 +1,237 @@
+### PART 8 of 90 - MIGRATION-FILES-CONTENT split (3 complete files: backend/app/models/audit_event.py ... backend/app/models/flaky_signature.py) ###
+
+================================================================================
+Area: Backend models
+File path: backend/app/models/audit_event.py
+================================================================================
+from sqlalchemy import Integer, JSON, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from ..database import Base
+
+
+class AuditEvent(Base):
+    """Append-only, hash-chained audit trail (design target: 7-year retention).
+
+    Each event's event_hash covers the previous event's hash, so any
+    tampering with a historical row breaks the chain and is detectable.
+    Enforced append-only via: no update/delete endpoints, no ORM mutation
+    paths, and DB triggers (see database.py).
+
+    created_at is stored as an ISO-8601 string because it is an input to the
+    hash — the stored bytes and the hashed bytes must be identical. ISO
+    strings sort correctly for range filters.
+    """
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), index=True)
+    entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    actor: Mapped[str] = mapped_column(String(128), default="system")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    event_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[str] = mapped_column(String(40), index=True)
+
+================================================================================
+Area: Backend models
+File path: backend/app/models/enums.py
+================================================================================
+from enum import Enum
+
+
+class Phase(str, Enum):
+    REFINEMENT = "REFINEMENT"
+    DEVELOPMENT = "DEVELOPMENT"
+    TESTING = "TESTING"
+    RELEASE = "RELEASE"
+
+
+PHASE_ORDER: list[Phase] = [
+    Phase.REFINEMENT,
+    Phase.DEVELOPMENT,
+    Phase.TESTING,
+    Phase.RELEASE,
+]
+
+
+def next_phase(phase: Phase) -> Phase | None:
+    idx = PHASE_ORDER.index(phase)
+    if idx + 1 < len(PHASE_ORDER):
+        return PHASE_ORDER[idx + 1]
+    return None
+
+
+class Cloud(str, Enum):
+    FSC = "FSC"
+    SALES = "SALES"
+    MARKETING = "MARKETING"
+
+
+class FcaImpact(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class ScopeStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+
+
+class RunStatus(str, Enum):
+    PROPOSED = "PROPOSED"                  # created; predecessor not yet accepted
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"  # unlocked; waiting for human Approve & Run
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"                # output ready; waiting for human decision
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    RERUN_REQUESTED = "RERUN_REQUESTED"    # superseded by a child run
+    SKIPPED = "SKIPPED"                    # agent disabled in settings; not run
+    FAILED = "FAILED"                      # engine/API error
+
+
+class GateStatus(str, Enum):
+    LOCKED = "LOCKED"
+    READY_FOR_SIGNOFF = "READY_FOR_SIGNOFF"
+    SIGNED_OFF = "SIGNED_OFF"
+    REJECTED = "REJECTED"
+
+
+class ArtifactKind(str, Enum):
+    SARIF = "SARIF"            # static analysis (PMD/Copado, SARIF 2.1.0)
+    JUNIT = "JUNIT"            # test results (JUnit/pytest/Playwright XML)
+    COVERAGE = "COVERAGE"      # code/Apex coverage (JSON or Cobertura XML)
+    METADATA = "METADATA"      # changed components / deployment manifest
+    FINANCIAL = "FINANCIAL"    # expected-vs-actual validation data
+    GENERIC = "GENERIC"        # freeform text, passed through as context
+
+
+# Which agents consume which artifact kinds.
+AGENT_ARTIFACT_KINDS: dict[str, list[ArtifactKind]] = {
+    "ac_compliance": [ArtifactKind.METADATA],
+    "apex_coverage": [ArtifactKind.COVERAGE, ArtifactKind.METADATA],
+    "static_analysis": [ArtifactKind.SARIF, ArtifactKind.METADATA],
+    "code_review": [ArtifactKind.SARIF, ArtifactKind.METADATA, ArtifactKind.GENERIC],
+    "deployability_validation": [ArtifactKind.METADATA, ArtifactKind.JUNIT],
+    "test_execution_analyst": [ArtifactKind.JUNIT],
+    "financial_data_integrity": [ArtifactKind.FINANCIAL],
+    "regression_scope": [ArtifactKind.METADATA],
+    "integration_e2e_journey": [ArtifactKind.JUNIT, ArtifactKind.METADATA],
+    "defect_triage": [ArtifactKind.JUNIT],
+    "security_dast": [ArtifactKind.SARIF, ArtifactKind.METADATA],
+    "test_data_management": [ArtifactKind.METADATA],
+    "deployment_risk": [ArtifactKind.METADATA],
+    "change_management": [ArtifactKind.METADATA],
+    "post_deploy_verification": [ArtifactKind.METADATA],
+    "release_notes": [ArtifactKind.METADATA],
+}
+
+# Which agents consume the accepted output of upstream agents on the same
+# story (chained pipeline: BDD formalizes the Three Amigos example map; AC
+# Compliance cross-references BDD scenarios for test coverage per criterion).
+AGENT_UPSTREAM_INPUTS: dict[str, list[str]] = {
+    # Refinement regulatory chain (shift-left compliance):
+    "fca_regulatory_impact": ["story_quality"],
+    "consumer_duty_mapper": ["fca_regulatory_impact"],
+    "compliance_ac_advisor": ["fca_regulatory_impact", "consumer_duty_mapper"],
+    # Three Amigos builds the example map over the AUGMENTED AC set: Story
+    # Quality's AC gaps become open questions/rules to pin down; the Advisor's
+    # proposed compliance ACs become fca-flagged example cards.
+    "three_amigos": ["story_quality", "compliance_ac_advisor"],
+    "bdd_generator": ["story_quality", "three_amigos", "compliance_ac_advisor"],
+    "ac_compliance": ["bdd_generator"],
+    "apex_coverage": ["bdd_generator"],
+    "test_execution_analyst": ["bdd_generator"],
+    "financial_data_integrity": ["bdd_generator"],
+    "regression_scope": ["bdd_generator"],
+    "integration_e2e_journey": ["bdd_generator", "regression_scope"],
+    "defect_triage": ["test_execution_analyst"],
+    "post_deploy_verification": ["bdd_generator"],
+    "release_notes": ["bdd_generator", "ac_compliance"],
+    # Release synthesis agents — grounded in the accepted results of the pipeline.
+    "release_readiness": [
+        "ac_compliance", "apex_coverage", "static_analysis", "code_review",
+        "deployability_validation", "test_execution_analyst",
+        "financial_data_integrity", "regression_scope", "security_dast",
+    ],
+    "uat_signoff_coordinator": ["fca_regulatory_impact"],
+    "regulatory_audit_trail": [
+        "fca_regulatory_impact", "consumer_duty_mapper",
+        "financial_data_integrity", "test_execution_analyst", "security_dast",
+    ],
+    "deployment_risk": [
+        "financial_data_integrity", "test_execution_analyst", "security_dast",
+        "apex_coverage", "static_analysis", "regression_scope", "deployability_validation",
+    ],
+    "change_management": [
+        "financial_data_integrity", "test_execution_analyst",
+        "security_dast", "deployability_validation",
+    ],
+    "monitoring_hypercare": ["security_dast", "apex_coverage", "integration_e2e_journey"],
+}
+
+
+class PushType(str, Enum):
+    COMMENT = "COMMENT"
+    LABEL = "LABEL"
+    TRANSITION = "TRANSITION"
+    ATTACHMENT = "ATTACHMENT"
+
+
+class PushStatus(str, Enum):
+    DRAFT = "DRAFT"
+    APPROVED = "APPROVED"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    RETRYING = "RETRYING"
+
+================================================================================
+Area: Backend models
+File path: backend/app/models/flaky_signature.py
+================================================================================
+from datetime import datetime
+
+from sqlalchemy import DateTime, Integer, JSON, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from ..database import Base
+from ..util import new_id, utcnow
+
+
+class FlakySignature(Base):
+    """Cross-run memory of a recurring test failure — Flaky-Test Intelligence.
+
+    A signature is a normalised fingerprint of (test name + failure message)
+    with volatile parts (numbers, ids, durations) stripped, so the same
+    underlying failure matches across runs and stories. The ledger scores
+    flakiness and supports an owned, EXPIRING quarantine — quarantine that
+    never expires is how test suites rot.
+    """
+
+    __tablename__ = "flaky_signatures"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    signature: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    test_name: Mapped[str] = mapped_column(String(256))
+    normalized_message: Mapped[str] = mapped_column(Text, default="")
+
+    occurrences: Mapped[int] = mapped_column(Integer, default=0)
+    flaky_votes: Mapped[int] = mapped_column(Integer, default=0)  # analyst said FLAKY
+    runs_seen: Mapped[list] = mapped_column(JSON, default=list)   # run ids (dedupe)
+    stories_seen: Mapped[list] = mapped_column(JSON, default=list)  # jira keys
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    flake_score: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+
+    status: Mapped[str] = mapped_column(String(12), default="WATCH")  # WATCH|QUARANTINED|CLEARED
+    owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quarantine_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    note: Mapped[str] = mapped_column(Text, default="")
+

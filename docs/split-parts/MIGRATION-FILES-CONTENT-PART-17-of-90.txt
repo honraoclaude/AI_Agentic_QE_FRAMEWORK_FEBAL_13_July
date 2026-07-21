@@ -1,0 +1,289 @@
+### PART 17 of 90 - MIGRATION-FILES-CONTENT split (2 complete files: backend/app/services/artifacts/service.py ... backend/app/services/audit.py) ###
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/artifacts/service.py
+================================================================================
+"""Artifact ingestion service: parse + store + audit, list, delete, and
+gather the artifacts each agent should consume when it runs.
+"""
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...models import AGENT_ARTIFACT_KINDS, Artifact, ArtifactKind, Story
+from .. import audit
+from ..workflow import NotFoundError
+from . import parsers
+
+
+async def store_artifact(
+    session: AsyncSession,
+    story: Story,
+    *,
+    kind: ArtifactKind,
+    filename: str,
+    content_type: str | None,
+    size_bytes: int,
+    parsed: dict,
+    summary: str,
+    parse_error: str | None,
+    raw_excerpt: str | None,
+    uploaded_by: str,
+    source: str = "MANUAL",
+    source_ref: str | None = None,
+    event_type: str = "ARTIFACT_UPLOADED",
+) -> Artifact:
+    """Persist a (already-parsed) artifact + audit event. Shared by the manual
+    upload path and the Copado ingest path so both behave identically once the
+    payload has been normalised into a `parsed` shape."""
+    artifact = Artifact(
+        story_id=story.id,
+        kind=kind,
+        filename=filename[:256],
+        content_type=content_type,
+        size_bytes=size_bytes,
+        parsed=parsed,
+        summary=summary,
+        parse_error=parse_error,
+        raw_excerpt=raw_excerpt,
+        uploaded_by=uploaded_by or "unknown",
+        source=source,
+        source_ref=source_ref,
+    )
+    session.add(artifact)
+    await session.flush()
+
+    await audit.record_event(
+        session,
+        event_type=event_type,
+        entity_type="artifact",
+        entity_id=artifact.id,
+        actor=uploaded_by or "unknown",
+        payload={
+            "story_id": story.id,
+            "jira_key": story.jira_key,
+            "kind": kind.value,
+            "filename": artifact.filename,
+            "size_bytes": artifact.size_bytes,
+            "summary": artifact.summary,
+            "parse_error": artifact.parse_error,
+            "source": source,
+            "source_ref": source_ref,
+        },
+    )
+    return artifact
+
+
+async def create_artifact(
+    session: AsyncSession,
+    story_id: str,
+    *,
+    kind: ArtifactKind | None,
+    filename: str,
+    content_type: str | None,
+    raw_bytes: bytes,
+    uploaded_by: str,
+) -> Artifact:
+    story = await session.get(Story, story_id)
+    if story is None:
+        raise NotFoundError(f"story {story_id} not found")
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw_bytes.decode("utf-8", errors="replace")
+
+    if kind is None:  # AUTO-detect
+        kind = parsers.detect_kind(filename, text)
+
+    result = parsers.parse(kind, text)
+    return await store_artifact(
+        session,
+        story,
+        kind=kind,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(raw_bytes),
+        parsed=result["parsed"],
+        summary=result["summary"],
+        parse_error=result["error"],
+        raw_excerpt=text[: parsers.RAW_EXCERPT_CAP],
+        uploaded_by=uploaded_by,
+        source="MANUAL",
+    )
+
+
+async def list_artifacts(session: AsyncSession, story_id: str) -> list[Artifact]:
+    return list(
+        (
+            await session.execute(
+                select(Artifact)
+                .where(Artifact.story_id == story_id)
+                .order_by(Artifact.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def delete_artifact(session: AsyncSession, artifact_id: str, actor: str) -> None:
+    artifact = await session.get(Artifact, artifact_id)
+    if artifact is None:
+        raise NotFoundError(f"artifact {artifact_id} not found")
+    payload = {
+        "story_id": artifact.story_id,
+        "kind": artifact.kind.value,
+        "filename": artifact.filename,
+    }
+    await session.delete(artifact)
+    await audit.record_event(
+        session,
+        event_type="ARTIFACT_DELETED",
+        entity_type="artifact",
+        entity_id=artifact_id,
+        actor=actor or "unknown",
+        payload=payload,
+    )
+
+
+async def gather_for_agent(
+    session: AsyncSession, story_id: str, agent_key: str
+) -> list[dict]:
+    """Return the parsed artifacts an agent consumes, newest first per kind.
+    Shape per item: {kind, filename, summary, parsed}."""
+    kinds = AGENT_ARTIFACT_KINDS.get(agent_key)
+    if not kinds:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(Artifact)
+                .where(
+                    Artifact.story_id == story_id,
+                    Artifact.kind.in_(kinds),
+                )
+                .order_by(Artifact.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "kind": a.kind.value,
+            "filename": a.filename,
+            "summary": a.summary,
+            "parsed": a.parsed,
+            "source": a.source,
+        }
+        for a in rows
+    ]
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/audit.py
+================================================================================
+"""Append-only, hash-chained audit trail.
+
+Every state transition, agent input/output hash, approval and Jira sync action
+goes through record_event(). Events are written in the same transaction as the
+state change they describe.
+"""
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import AuditEvent
+from ..util import canonical_json, sha256_hex, utcnow_iso
+
+GENESIS_HASH = "0" * 64
+
+
+def _compute_event_hash(
+    *,
+    prev_hash: str,
+    event_type: str,
+    entity_type: str,
+    entity_id: str,
+    actor: str,
+    payload_hash: str,
+    created_at: str,
+) -> str:
+    material = "|".join(
+        [prev_hash, event_type, entity_type, entity_id, actor, payload_hash, created_at]
+    )
+    return sha256_hex(material)
+
+
+async def record_event(
+    session: AsyncSession,
+    *,
+    event_type: str,
+    entity_type: str,
+    entity_id: str,
+    actor: str = "system",
+    payload: dict | None = None,
+) -> AuditEvent:
+    payload = payload or {}
+    payload_hash = sha256_hex(canonical_json(payload))
+
+    last = (
+        await session.execute(
+            select(AuditEvent).order_by(AuditEvent.id.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    prev_hash = last.event_hash if last else GENESIS_HASH
+
+    created_at = utcnow_iso()
+    event = AuditEvent(
+        event_type=event_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        actor=actor,
+        payload=payload,
+        payload_hash=payload_hash,
+        prev_hash=prev_hash,
+        event_hash=_compute_event_hash(
+            prev_hash=prev_hash,
+            event_type=event_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            actor=actor,
+            payload_hash=payload_hash,
+            created_at=created_at,
+        ),
+        created_at=created_at,
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
+async def verify_chain(session: AsyncSession) -> dict:
+    """Walk the whole chain and re-derive every hash. Returns a verdict dict
+    for the compliance export / integrity endpoint."""
+    events = (
+        (await session.execute(select(AuditEvent).order_by(AuditEvent.id))).scalars().all()
+    )
+    prev_hash = GENESIS_HASH
+    for ev in events:
+        if ev.prev_hash != prev_hash:
+            return {"valid": False, "broken_at": ev.id, "reason": "prev_hash mismatch"}
+        if ev.payload_hash != sha256_hex(canonical_json(ev.payload)):
+            return {"valid": False, "broken_at": ev.id, "reason": "payload tampered"}
+        expected = _compute_event_hash(
+            prev_hash=ev.prev_hash,
+            event_type=ev.event_type,
+            entity_type=ev.entity_type,
+            entity_id=ev.entity_id,
+            actor=ev.actor,
+            payload_hash=ev.payload_hash,
+            created_at=ev.created_at,
+        )
+        if ev.event_hash != expected:
+            return {"valid": False, "broken_at": ev.id, "reason": "event_hash mismatch"}
+        prev_hash = ev.event_hash
+    return {"valid": True, "events": len(events)}
+

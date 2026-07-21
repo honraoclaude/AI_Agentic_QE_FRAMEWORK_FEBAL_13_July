@@ -1,0 +1,119 @@
+{
+  "agent": "test_execution_analyst",
+  "description": "Blocking-capable agent — FCA-scenario failures and unexecuted FCA scenarios must always release-block, no override.",
+  "cases": [
+    {
+      "name": "no_artifact_is_outstanding_evidence_not_a_pass",
+      "labelled_by": "QE lead — absence of evidence must not be reported as a pass",
+      "story": {
+        "jira_key": "EVAL-TE-1",
+        "summary": "Household net-worth rollup",
+        "acceptance_criteria": ["The rollup total equals the sum of active accounts"],
+        "fca_impact": "HIGH", "fca_impact_confirmed": true, "cloud": "FSC"
+      },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "WARN" },
+        { "path": "release_blocking", "equals": false },
+        { "path": "run_summary.total", "equals": 0 },
+        { "path": "summary", "contains": "outstanding" }
+      ]
+    },
+    {
+      "name": "clean_run_passes",
+      "labelled_by": "QE lead — zero failures must pass",
+      "story": {
+        "jira_key": "EVAL-TE-2", "summary": "Household net-worth rollup",
+        "acceptance_criteria": ["The rollup total equals the sum of active accounts"],
+        "fca_impact": "MEDIUM", "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "JUNIT", "filename": "results.xml", "summary": "clean run", "parsed": {
+          "total": 5, "passed": 5, "failed": 0, "errors": 0, "skipped": 0,
+          "all_tests": ["testA", "testB", "testC", "testD", "testE"], "failures": []
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "PASS" },
+        { "path": "release_blocking", "equals": false },
+        { "path": "failures", "min_len": 0 }
+      ]
+    },
+    {
+      "name": "product_defect_failure_fails_but_does_not_block",
+      "labelled_by": "QE lead — a non-FCA product defect fails the run but is not release-blocking by itself",
+      "story": {
+        "jira_key": "EVAL-TE-3", "summary": "Household net-worth rollup",
+        "acceptance_criteria": ["The rollup total equals the sum of active accounts"],
+        "fca_impact": "LOW", "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "JUNIT", "filename": "results.xml", "summary": "one failure", "parsed": {
+          "total": 3, "passed": 2, "failed": 1, "errors": 0, "skipped": 0,
+          "all_tests": ["testRollupSum", "testOther1", "testOther2"],
+          "failures": [{"name": "testRollupSum", "message": "Expected 875000.00 but was 874998.37"}]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "release_blocking", "equals": false },
+        { "path": "failures.0.classification", "equals": "PRODUCT_DEFECT" },
+        { "path": "failures.0.severity", "equals": "CRITICAL" },
+        { "path": "failures.0.is_fca_scenario", "equals": false }
+      ]
+    },
+    {
+      "name": "fca_scenario_failure_blocks_no_override",
+      "labelled_by": "Compliance officer — an @fca scenario failure is release-blocking, no override, regardless of severity elsewhere",
+      "story": {
+        "jira_key": "EVAL-TE-4", "summary": "Recalculation audit record",
+        "acceptance_criteria": ["Every recalculation writes an immutable audit record"],
+        "fca_impact": "HIGH", "fca_impact_confirmed": true, "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "JUNIT", "filename": "results.xml", "summary": "fca failure", "parsed": {
+          "total": 2, "passed": 1, "failed": 1, "errors": 0, "skipped": 0,
+          "all_tests": ["Recalculation is evidenced for audit", "Some other unrelated check"],
+          "failures": [{"name": "Recalculation is evidenced for audit", "message": "Audit record was not written for the balance change"}]
+        }}
+      ],
+      "upstream": [
+        { "agent_key": "bdd_generator", "agent_name": "BDD Scenario Generator", "output": {
+          "scenarios": [{"title": "Recalculation is evidenced for audit", "tags": ["@fca", "@p1"]}]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "release_blocking", "equals": true },
+        { "path": "failures.0.is_fca_scenario", "equals": true },
+        { "path": "failures.0.severity", "equals": "BLOCKER" },
+        { "path": "classification_breakdown.blocking", "equals": 1 }
+      ]
+    },
+    {
+      "name": "unexecuted_fca_scenario_blocks_even_with_zero_failures",
+      "labelled_by": "Compliance officer — missing FCA evidence blocks release exactly like a failure would",
+      "story": {
+        "jira_key": "EVAL-TE-5", "summary": "Recalculation audit record",
+        "acceptance_criteria": ["Every recalculation writes an immutable audit record"],
+        "fca_impact": "HIGH", "fca_impact_confirmed": true, "cloud": "FSC"
+      },
+      "artifacts": [
+        { "kind": "JUNIT", "filename": "results.xml", "summary": "unrelated tests only", "parsed": {
+          "total": 2, "passed": 2, "failed": 0, "errors": 0, "skipped": 0,
+          "all_tests": ["testUnrelatedOne", "testUnrelatedTwo"], "failures": []
+        }}
+      ],
+      "upstream": [
+        { "agent_key": "bdd_generator", "agent_name": "BDD Scenario Generator", "output": {
+          "scenarios": [{"title": "Recalculation is evidenced for audit", "tags": ["@fca", "@p1"]}]
+        }}
+      ],
+      "expect": [
+        { "path": "release_blocking", "equals": true },
+        { "path": "unexecuted_fca_scenarios", "min_len": 1 },
+        { "path": "unexecuted_fca_scenarios", "set_overlap": ["Recalculation is evidenced for audit"] }
+      ]
+    }
+  ]
+}

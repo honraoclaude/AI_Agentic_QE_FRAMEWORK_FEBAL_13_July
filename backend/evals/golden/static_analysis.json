@@ -1,0 +1,55 @@
+{
+  "agent": "static_analysis",
+  "description": "PMD/Copado SARIF triage + FSC-specific augmentation. The FSC review checklist always injects 2 HIGH findings, so the quality gate (0 HIGH/CRITICAL) fails in every case in this fixture — that invariant is itself worth locking down.",
+  "cases": [
+    {
+      "name": "no_sarif_still_finds_fsc_specific_issues_and_fails_gate",
+      "labelled_by": "QE lead — the FSC review checklist runs even with no scanner output, and the gate fails because of it",
+      "story": { "jira_key": "EVAL-SA-1", "summary": "Household rollup", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "issues", "min_len": 3 },
+        { "path": "triage.raw_findings", "equals": 0 },
+        { "path": "triage.added_by_ai", "equals": 3 },
+        { "path": "quality_gate.passed", "equals": false }
+      ]
+    },
+    {
+      "name": "naming_convention_noise_is_suppressed_not_reported_as_a_defect",
+      "labelled_by": "QE lead — style/naming rules are noise, not defects; they must be suppressed with a reason, not silently dropped or treated as real findings",
+      "story": { "jira_key": "EVAL-SA-2", "summary": "Household rollup", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "SARIF", "filename": "scan.sarif", "summary": "pmd scan", "parsed": {
+          "findings": [{"rule": "VariableNamingConventions", "level": "note",
+                        "location": "HouseholdRollupService.cls:12", "message": "variable name too short"}]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "suppressed", "min_len": 1 },
+        { "path": "suppressed.0.rule", "equals": "VariableNamingConventions" },
+        { "path": "triage.confirmed", "equals": 0 }
+      ]
+    },
+    {
+      "name": "soql_injection_finding_is_categorised_as_security_high",
+      "labelled_by": "Security reviewer — a SOQL-injection-pattern finding must be categorised SECURITY, mapped to CWE-89, at HIGH severity",
+      "story": { "jira_key": "EVAL-SA-3", "summary": "Household rollup", "acceptance_criteria": ["x"], "cloud": "FSC" },
+      "artifacts": [
+        { "kind": "SARIF", "filename": "scan.sarif", "summary": "pmd scan", "parsed": {
+          "findings": [{"rule": "SOQLInjectionRisk", "level": "error",
+                        "location": "HouseholdSearchController.cls:44", "message": "dynamic SOQL built from user input"}]
+        }}
+      ],
+      "expect": [
+        { "path": "verdict", "equals": "FAIL" },
+        { "path": "issues.0.category", "equals": "SECURITY" },
+        { "path": "issues.0.severity", "equals": "HIGH" },
+        { "path": "issues.0.standard.cwe", "equals": "CWE-89" },
+        { "path": "counts.security", "equals": 1 },
+        { "path": "taxonomy.vulnerability", "equals": 1 }
+      ]
+    }
+  ]
+}

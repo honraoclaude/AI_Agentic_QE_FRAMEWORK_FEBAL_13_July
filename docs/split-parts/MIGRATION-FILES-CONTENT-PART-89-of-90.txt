@@ -1,0 +1,316 @@
+### PART 89 of 90 - MIGRATION-FILES-CONTENT split (1 complete files: docs/ROADMAP.md ... docs/ROADMAP.md) ###
+
+================================================================================
+Area: Docs
+File path: docs/ROADMAP.md
+================================================================================
+# Roadmap — AI Agentic QE Platform
+
+Forward-looking ideas to extend the platform. Grouped by theme; each item has a
+rough **value** and **effort** read. Nothing here is committed to a release yet —
+this is the idea backlog we prioritise from.
+
+Legend: 🟢 high value · 🟡 medium · ⚪ nice-to-have · (S/M/L) = effort.
+
+---
+
+## 1. Compliance as a first-class product
+*Exploits the hash-chained audit trail and FCA context — our biggest differentiator.*
+
+- ✅ **SHIPPED — Regulatory Evidence Pack** — one-click auditor-ready HTML
+  document (`GET /stories/{id}/evidence-pack`, print-to-PDF): gate sign-offs,
+  the AI-governance execution record (every agent run + prompt version + model +
+  tokens + output hash), regulatory & financial evidence, release-health
+  synthesis, and the verified hash-chain.
+- 🟡 **Consumer Duty outcome mapping (M)** — tag stories against the four
+  Consumer Duty outcomes and score coverage per release.
+- 🟡 **Cryptographic sign-off (M)** — bind each gate sign-off to a signing key
+  for true non-repudiation, layered on the existing hash chain.
+
+## 2. Trustworthy agents
+*Raises confidence in the agentic core — the "trust" in "AI That Tests. Humans Who Trust."*
+
+- ✅ **SHIPPED — Cross-Agent Referee + Release Health Index** — a cross-cutting
+  synthesis over all of a story's runs: a confidence-weighted health score + band,
+  per-phase breakdown, and deterministic checks that flag contradictions *between*
+  agents (e.g. GO recommended while Financial Integrity failed). `GET
+  /stories/{id}/health`.
+- ✅ **SHIPPED — Confidence + self-critique** — every agent emits
+  `{level, rationale, caveats}` on the shared envelope; the "why you might override
+  me" caveats support the HITL gates. *(Not yet: auto-routing low confidence to a
+  human — see below.)*
+- ✅ **SHIPPED — Human-feedback loop / agent-performance analytics** — mines the
+  Accept / Reject / Re-run-with-guidance decisions into per-agent trust scores,
+  override rates and reject reasons. `GET /insights/agents` + the Agent Insights
+  tab. Tells us *which agents humans push back on*.
+
+- ✅ **SHIPPED — Replay Verifier** — `POST /runs/{id}/replay` + "Verify
+  reproducibility" button: re-executes a historical run and compares hashes —
+  REPRODUCED / INPUT_DRIFT (names what moved) / OUTPUT_DIVERGED (tamper-evidence).
+  Audited as RUN_REPLAYED.
+- ✅ **SHIPPED — Adversarial Challenger** — deterministic red-team pass pinned to
+  every gate sign-off (`GET /stories/{id}/challenges?phase=`): caveats, severe
+  findings under accepting verdicts, contradictions, blocking questions,
+  uncovered evidence — "the case against", advisory only. (LLM augmentation
+  layer deferred, clearly-tagged, when wanted.)
+- ✅ **SHIPPED — Eval harness v1** — `backend/evals/golden/` +
+  `services/evals.py`: expert-labelled golden cases graded deterministically
+  (equals/approx/min_len/contains), schema-validated, run in the test suite on
+  every push. Financial Data Integrity seeded (4 cases). Real-model scoring
+  per prompt version = the remaining step.
+
+### 📌 PARKED — Agent eval harness + golden dataset (M–L)
+*The measured-accuracy complement to the (shipped) feedback loop. Feedback tells
+us whether humans agree; an eval harness tells us whether an agent is actually
+**right** against an expert-labelled answer key — and catches regressions before
+they ship.*
+
+- **Golden dataset** — per-agent files of `{input, expected}` cases labelled by a
+  compliance/QE expert (e.g. Financial Integrity: a £1.63-discrepancy artifact →
+  expected `verdict FAIL`, `release_blocking true`, `variance 1.63`).
+- **Eval harness** — a runner that executes each agent (the real Claude path) on
+  its golden cases and grades the output: exact-match for structured fields,
+  set-overlap for citations (e.g. FCA Handbook refs), and LLM-as-judge on a rubric
+  for free-text rationale. Produces a per-agent, per-prompt-version accuracy
+  scorecard over time.
+- **Why:** makes prompt versioning (v1→v2→v3) *safe* — regressions fail red
+  before shipping; and turns "the AI said so" into "measured at N% against an
+  expert-labelled test set, re-verified on every change." Gate it in CI.
+- **Cost:** the golden labelling is the real investment (a human defines "correct"
+  for a few dozen cases per agent) — and that labelled set *is* the defensible
+  asset. Start with **Financial Data Integrity** (deterministic, grades cleanly).
+- **Also parked here:** *auto-route low-confidence outputs to a human* — use the
+  shipped `confidence.level` to force a mandatory human review when LOW, rather
+  than letting it flow through on Accept.
+
+### 📌 PARKED — Meta-agents: agent health + memory (build in sequence)
+*Agents about the agents. Note the overlap with what's already shipped, and the
+FCA guardrail on "learning".*
+
+**Already shipped (don't rebuild):** Cross-Agent Referee + Release Health Index
+(per-story synthesis + contradictions); Agent-Performance / Feedback analytics
+(`/insights/agents` — per-agent trust, accept/reject/rerun). Those cover *quality*
+health. The two below are the gaps.
+
+**1) ✅ SHIPPED — Operational Agent Health monitor.** `services/agent_health.py`
+→ `GET /insights/agent-health` → "Operational Health" section on Agent Insights:
+failure rates, latency, token spend, per-prompt-version reliability, and
+threshold alerts (FAILURE_RATE, VERSION_REGRESSION). Deterministic — no model
+calls. *(Original sketch below, kept for context.)*
+
+**Original sketch — Operational Agent Health monitor (M).**
+The SRE/observability layer the quality analytics don't give: failure/error rates
+(`RUN_FAILED`), latency, **token cost/budget**, per-model and **per-prompt-version
+reliability** (did v3 regress?), confidence trend, and **anomaly alerts**
+("Static Analysis started failing after the v3 prompt"). Deterministic **service +
+dashboard** (like Insights) — cheap and reproducible; an LLM layer is only needed
+later for narrative "why is it degrading" explanations. Design sketch was
+`services/agent_health.py` → `GET /insights/agent-health` → an "Operational Health"
+section on the Agent Insights tab.
+
+**2) Institutional Memory — advisory briefing agent (L) — build second.**
+Today every agent is **stateless** (no memory across stories). A Refinement-phase
+**advisory briefing agent** would, at intake, recall relevant past
+stories/decisions/outcomes and brief the team ("similar to WLTH-88, which failed
+Financial Integrity on rounding; reusable BDD from WLTH-90"), backed by a memory
+store. Scoped **advisory-only** (agreed):
+- **Advisory** — surfaces context; the human still gates. No behaviour auto-change.
+- **Transparent** — what it recalled and why is in the audit trail.
+- **Reproducible** — a past decision replays with the memory it used.
+- *Deferred (FCA landmine):* RAG knowledge reuse (retrieve past accepted BDD /
+  reg-mappings / fixtures) and **any feedback-driven self-tuning** — the latter
+  risks auditability/reproducibility and is cautioned against in a regulated context.
+
+## 3. Proactive intelligence
+*Activates the underused "P" (Proactive) in PACT.*
+
+- 🟢 **Regulation-change → test-impact agent (L)** — monitor FCA Handbook /
+  Consumer Duty updates and map changes to affected scenarios/stories.
+- 🟡 **Org-drift detection (M)** — compare live Salesforce metadata to the tested
+  baseline and auto-raise a story on drift.
+- 🟡 **Predictive risk radar (M)** — learn from historical run outcomes to score
+  which incoming stories are likely to fail testing.
+
+### 📌 PARKED — Shadow Backtest (M) — the adoption wedge
+*Discussed 2026-07-18; parked by choice, not doubt. Run the ENTIRE pipeline
+read-only over N already-released stories — no gates, no pushes, nothing
+blockable — and compare verdicts with what actually happened.*
+
+- **Mechanics:** batch orchestration mode, not a new agent — `backtest.py`
+  looping stories × 26 agents in shadow (reuse `engine.execute`; shadow runs
+  never feed gates/upstream), then an outcome-comparison step (pipeline verdict
+  vs later hot-fixes/defects from Jira, human-confirmed), then one report in
+  the Evidence-Pack style: "on your last 30 shipped stories we'd have raised
+  4 BLOCKER financial findings and flagged 2 stories you later hot-fixed."
+- **Why it leads adoption:** zero process change to try; evidence is the
+  customer's own history (un-arguable); the hits self-select the leadership
+  demo; every agreement/disagreement is a free real-world labelled case for
+  the eval harness.
+- **Limits:** artifact availability caps the Dev/Test agents on old stories
+  (confidence caveats already handle thin input); hindsight labelling needs a
+  quick human confirm; real-path model cost is N×26 calls (demo path free).
+- **When:** the moment the framework meets a real team with real history.
+
+### 📌 QE value-add shortlist (2026-07-18 analysis)
+1. ✅ **SHIPPED — Risk Acceptance Register / quality-debt ledger** — every
+   accepted-despite decision (run accepted over WARN/HIGH+ findings, gate
+   signed over WARNs, CONDITIONAL_GO) auto-materialises into a register entry
+   with owner, rationale (optional prompt on risky Accept), severity-derived
+   review-by window (7/14/30/60/90d), OPEN → REVIEWED → CLOSED + OVERDUE
+   escalation. Surfaced in: Risk Register tab, the Challenger at gate sign-off
+   ("signing over N open accepted risks"), the Evidence Pack (§6), and
+   RISK_ACCEPTED/REVIEWED/CLOSED audit events. `GET /risk-register`.
+2. ✅ **SHIPPED — Flaky-Test Intelligence** — cross-run failure-signature
+   ledger (volatile parts normalised, so the same failure matches across
+   runs/stories) with flake scores; owned + EXPIRING quarantine (1-90d,
+   expired → flagged for review, never silently extended); fed back to Test
+   Execution Analyst + Defect Triage as advisory upstream evidence ("matches
+   FLK-…, seen 7× — re-run, not defect"; all-known-flaky clusters withdraw
+   their suggested defect). Insights tab section. `GET /insights/flaky-tests`.
+3. **Synthetic FCA-safe data generator (M)** — generate deterministic seeded
+   fixtures (households/accounts, GBP edge cases) directly from BDD example
+   cards (EX-1.3 "pending excluded" → a fixture containing exactly that);
+   makes "no real client data in testing" a generated artifact, not a policy.
+
+## 4. Human-in-the-loop UX
+
+- 🟢 **"Ask the audit trail" (M)** — natural-language Q&A (RAG over audit events +
+  agent outputs): "Why was WLTH-101 blocked?" → sourced answer with links.
+- 🟡 **Approval SLAs + escalation (S)** and **Slack/Teams notifications (S)** wired
+  to the existing work queue.
+
+### ✅ SHIPPED — Stakeholder reporting (report-per-decision, not one dashboard)
+*Built 2026-07-19 per the agreed plan: four audiences over one shared
+vocabulary; standards adopted = DORA subset (honest labels: rework ≠ CFR
+until the Escape Loop lands) + classic QE metrics + Consumer-Duty MI framing.*
+- **Release entity** (JSON story linkage — the grain leadership thinks in;
+  also the future hook for Copado Phase-2 gating) + **sealed MI snapshots**:
+  `ReportSnapshot` with canonical hash recorded in the audit chain
+  (REPORT_SEALED) — "the numbers the board saw" stay reproducible. Live
+  previews clearly UNSEALED.
+- **Exec MI pack** (per release, sealable, print-ready HTML): Release
+  Confidence Index (referee rollup), quality-debt position, regulatory
+  evidence completeness, AI-governance line, lead time / rework.
+- **Flow (PM/PO, live):** gate cycle times, HITL queue depth + decision
+  latency, blocking-question aging. **Quality (BA/QA, live):** traceability
+  integrity, pyramid, first-time-right per agent, flake index.
+  **Worklist (Dev, live):** findings strongest-first per story.
+- UI: Reports tab (4 sub-views); `/reports/*` endpoints.
+
+*(Original parked design kept below for reference.)*
+*Principle: a report serves one decision; reports per persona over one shared
+vocabulary (same severity scale, health band, confidence, trust scores) so
+numbers never contradict across views.*
+
+| Persona | Decision | Grain | Cadence | Hero metric | Backed by |
+|---|---|---|---|---|---|
+| **Senior mgmt** | Are we exposed? Worth it? | Portfolio | Weekly/monthly digest | Regulatory exposure + release confidence + value realized | 🆕 rollup over Referee health + audit |
+| **Product Owner** | Is *my* story ready to ship? | Story | Per-story/sprint | Readiness + open blockers + sign-off state | ✅ Referee health, gates |
+| **Delivery/PM** | Where is flow stuck? Who owes what? | Flow (across stories) | Daily/standup | Pipeline aging + HITL queue depth + SLA breaches | 🆕 flow view over work queue |
+| **Dev / BA** | What do I fix, exactly? | Run/finding | Real-time | Actionable finding list w/ location + remediation | ✅ code review, static, AC, deployability |
+| **QA** | Is quality proven? What's the gap? | Story (testing) | Per-story | Coverage + failure analysis + FCA-scenario/traceability | ✅ test-execution, coverage, regression, financial-integrity |
+
+- **Reuse-heavy** (PO, Dev, QA) — re-cuts/filters of data the agents + Referee
+  already produce; framing, not new intelligence.
+- **Net-new** (Leadership, PM) — both need a **cross-story / portfolio rollup**
+  layer that doesn't exist today (everything is per-story `StoryHealth`). That
+  rollup is the one real new building block and powers *both* — build it as the
+  foundation. Exec ROI line (hours saved, escaped defects) depends on the Value
+  Realization / Escape Loop instrumentation; ship exec **posture-only** first.
+
+**Open decisions to agree before building:**
+1. Delivery model — in-app role-aware views only, or *pushed* digests (PDF/email/
+   Slack) for exec/PM who won't log in? (rec: in-app for all five + exportable
+   one-pager for exec, reusing the evidence-pack print-to-PDF pattern.)
+2. Build the portfolio rollup (unlocks exec + PM), or stay story-only for now?
+   (rec: build it.)
+3. First cut: all five, or prove the pattern on one — Leadership (forces the
+   rollup) or PM flow (highest operational pain)? (rec: one first.)
+4. Confirm the five hero metrics — every report is built backward from its number.
+
+## 5. Ecosystem depth
+
+- 🟢 **Copado CI/CD integration** — see [COPADO-INTEGRATION.md](COPADO-INTEGRATION.md).
+  - **Phase 1 (in progress): ingest-only** — Copado CodeScan/CRT/Apex/commit
+    results normalise onto existing artifact kinds and feed the agents.
+  - **Phase 2 (planned): gating** — "Copado holds, we release on sign-off"; prod
+    promotion blocked until the human Release gate is signed off, no override.
+- ⚪ **Synthetic FCA-safe test data (M)** — generate anonymised household/account
+  fixtures so no real client data is used in testing.
+
+## 6. New QE agents (Development & Testing phases)
+*Under active discussion — candidate agents to fill coverage gaps. See notes as
+we agree scope, then build following the plan → confirm → build rhythm.*
+
+- **Development:** Unit Test Quality, Governor-Limit / Performance Risk,
+  Security & Sharing (CRUD/FLS), Declarative-Change (Flow/Validation) review,
+  Deployment/Package Readiness. *(shortlist — TBD)*
+- **Testing:** Test Case / UAT Design, Integration & E2E Journey, Defect Triage /
+  Root Cause, Accessibility (WCAG for client portals), Data Migration Validation.
+  *(shortlist — TBD)*
+
+## 7. Architecture & tech-debt improvements
+*Architect's review output. Trajectory agreed: **demo / prototype / portfolio** —
+so items are right-sized to demonstrate senior judgement, not gold-plated for a
+live regulated deployment. Sequenced into reviewable batches, signal-first.
+Nothing built yet.*
+
+**Batch 1 — CI + cheap correctness (highest signal per hour)**
+- 🟢 **GitHub Actions CI (S)** — pytest + `tsc`/`vite build` on every push; green
+  badge on the README. *Re-affirmed as the #1 priority in the 2026-07-19
+  architect/QE assessment: the framework preaches CI gates but has none on
+  itself — narrative-consistency gap, half a day to close.* Design agreed:
+  `.github/workflows/ci.yml`, two parallel jobs (backend: setup-python 3.13 →
+  pip install → `pytest -q`; frontend: setup-node 20 → `npm ci` →
+  `npm run build`), on `[push, pull_request]`, free on the public repo.
+  Later riders (each trivial once CI exists): the **eval harness in CI**
+  (prompt bumps gated by golden-dataset evals), `ruff`, `tsc --noEmit`.
+
+*Other 2026-07-19 assessment priorities parked here (in recommended order
+after CI): (2) **README honesty pass** — state the demo-fixture vs live-model
+boundary explicitly; (3) **auth seam** (= Batch 4 below); (4) **eval harness
+growth** — 3-5 golden cases × top-5 agents + one live-model smoke eval script;
+(5) **Accessibility/WCAG agent** for client portals (Consumer Duty cares about
+accessible client communications — the one domain gap in Testing coverage).*
+- 🟢 **Enforce signer roles at gate sign-off (S)** — reject a sign-off whose role
+  isn't a permitted signer for the phase (`workflow.signoff_gate` + existing
+  `GATE_SIGNERS`). Makes the HITL model actually enforced.
+- 🟡 **`ARCHITECTURE.md` + ruff/eslint config (S)** — document the `.env`-vs-DB
+  settings boundary and the (deferred) migration strategy.
+
+**Batch 2 — Robustness (small, good hygiene)**
+- 🟡 Retain raw Copado payload + payload size cap + a TestClient HTTP-level Copado test.
+- 🟡 Artifact **dedupe/precedence** in `gather_for_agent` (newest-per-kind).
+- ⚪ **Startup validation** of configured model IDs.
+
+**Batch 3 — Refactors (craftsmanship)**
+- 🟡 Split `demo_outputs.py` (1,506 lines) and `RunCard.tsx` (1,208) into per-agent
+  modules/components.
+- 🟡 Consolidate response models into `schemas/`; introduce a **declarative
+  per-agent capability registry** (artifact kinds + upstream + blocking + prompt
+  version in one place).
+- ⚪ Frontend/backend type drift — document an OpenAPI→TS convention (codegen slimmed).
+
+**Batch 4 — Auth seam (portfolio version, not real SSO)**
+- 🟡 Introduce an **auth/identity dependency** resolving "current actor + roles"
+  (stubbed for demo, pluggable for OIDC); derive `approver` from it instead of the
+  request body. Demonstrates authN/authZ + non-repudiation without an IdP integration.
+
+**Deliberately slimmed / deferred (portfolio scope):**
+- ❌ Real SSO/OIDC integration — the seam (Batch 4) shows the judgement; full IdP
+  wiring is effort no reviewer exercises.
+- ⏸ Alembic migrations + Postgres append-only triggers — matter only for live
+  deployment; documented in `ARCHITECTURE.md` instead. *(Optional showcase: add
+  Alembic anyway, ~1h.)*
+
+---
+
+### Suggested starting order
+1. **Regulatory Evidence Pack** — highest value-per-effort, makes the compliance
+   story tangible.
+2. **Cross-agent Referee** — directly strengthens trust in the agentic pipeline.
+3. **Architecture Batch 1** (Section 7) — CI + role enforcement; credibility for
+   little code, guards everything after.
+4. Then Architecture Batches 2–4, new Development/Testing agents (Section 6), and
+   Copado Phase 2 gating as scope is agreed.
+

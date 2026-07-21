@@ -1,3 +1,102 @@
+### PART 20 of 90 - MIGRATION-FILES-CONTENT split (2 complete files: backend/app/services/copado/service.py ... backend/app/services/evals.py) ###
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/copado/service.py
+================================================================================
+"""Copado ingest service (Phase 1).
+
+Resolve the target story, normalise a Copado result payload into an existing
+artifact shape, store it (source=COPADO) and audit it. Links the Copado User
+Story id to the story on first sighting.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...models import Story
+from ..artifacts import service as artifact_service
+from ..workflow import NotFoundError
+from . import normaliser
+
+
+async def _resolve_story(
+    session: AsyncSession, *, jira_key: str | None, copado_user_story_id: str | None
+) -> Story:
+    story: Story | None = None
+    if copado_user_story_id:
+        story = (
+            await session.execute(
+                select(Story).where(Story.copado_user_story_id == copado_user_story_id)
+            )
+        ).scalar_one_or_none()
+    if story is None and jira_key:
+        story = (
+            await session.execute(select(Story).where(Story.jira_key == jira_key))
+        ).scalar_one_or_none()
+    if story is None:
+        raise NotFoundError(
+            "no story matches the Copado result "
+            f"(jira_key={jira_key!r}, copado_user_story_id={copado_user_story_id!r})"
+        )
+    # Link on first sighting so future results resolve directly.
+    if copado_user_story_id and not story.copado_user_story_id:
+        story.copado_user_story_id = copado_user_story_id
+    return story
+
+
+def _source_ref(copado_user_story_id: str | None, run: dict | None) -> str:
+    run = run or {}
+    us = copado_user_story_id or run.get("user_story") or "Copado"
+    env = run.get("environment")
+    run_id = run.get("run_id")
+    parts = [us]
+    if env:
+        parts.append(f"@ {env}")
+    if run_id:
+        parts.append(f"({run_id})")
+    return " ".join(parts)[:256]
+
+
+async def ingest_result(
+    session: AsyncSession,
+    *,
+    result_type: str,
+    payload,
+    jira_key: str | None = None,
+    copado_user_story_id: str | None = None,
+    run: dict | None = None,
+    actor: str = "copado",
+):
+    """Normalise + store one Copado result as an artifact on the resolved story."""
+    story = await _resolve_story(
+        session, jira_key=jira_key, copado_user_story_id=copado_user_story_id
+    )
+    norm = normaliser.normalise(result_type, payload)
+    artifact = await artifact_service.store_artifact(
+        session,
+        story,
+        kind=norm["kind"],
+        filename=norm["filename"],
+        content_type="application/json",
+        size_bytes=0,
+        parsed=norm["parsed"],
+        summary=norm["summary"],
+        parse_error=norm["parse_error"],
+        raw_excerpt=None,
+        uploaded_by=actor,
+        source="COPADO",
+        source_ref=_source_ref(copado_user_story_id, run),
+        event_type="ARTIFACT_INGESTED",
+    )
+    return story, artifact
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/evals.py
+================================================================================
 """Agent eval harness — measured accuracy against expert-labelled golden cases.
 
 Prompt versions were previously bumped on judgement alone; this harness makes
@@ -5,15 +104,10 @@ them measured. Each agent has golden cases (backend/evals/golden/<agent>.json):
 an input (story + artifacts + upstream) and expert-labelled expectations over
 the structured output, graded deterministically:
 
-- equals        — exact value at a dot-path
-- approx/tol    — numeric within tolerance (financial variances)
-- min_len       — a list must have at least N items
-- contains      — a string field must contain a substring
-- not_contains  — a string field must NOT contain a substring (regression
-                  guards: "the fixed bug's wording must never come back")
-- set_overlap   — a list field must include at least `min` (0-1, default 1.0)
-                  fraction of an expected set (citations, finding names —
-                  where exact order/count don't matter but coverage does)
+- equals      — exact value at a dot-path
+- approx/tol  — numeric within tolerance (financial variances)
+- min_len     — a list must have at least N items
+- contains    — a string field must contain a substring
 
 Runs against the demo path in CI (deterministic — catches fixture/schema
 regressions on every push) and against the real Claude path when an API key is
@@ -88,16 +182,6 @@ def grade(output: dict, expectations: list[dict]) -> list[dict]:
         elif "contains" in exp:
             want = exp["contains"]
             ok = isinstance(actual, str) and want.lower() in actual.lower()
-        elif "not_contains" in exp:
-            want = f"NOT: {exp['not_contains']}"
-            ok = isinstance(actual, str) and exp["not_contains"].lower() not in actual.lower()
-        elif "set_overlap" in exp:
-            expected_set = set(exp["set_overlap"])
-            min_frac = exp.get("min", 1.0)
-            want = f"{min_frac:.0%} of {sorted(expected_set)}"
-            actual_set = set(actual) if isinstance(actual, list) else set()
-            overlap = len(expected_set & actual_set) / len(expected_set) if expected_set else 1.0
-            ok = overlap >= min_frac
         results.append({"path": path, "expected": want, "actual": actual, "passed": ok})
     return results
 
@@ -141,3 +225,4 @@ def available_agents() -> list[str]:
     if not GOLDEN_DIR.exists():
         return []
     return sorted(p.stem for p in GOLDEN_DIR.glob("*.json"))
+

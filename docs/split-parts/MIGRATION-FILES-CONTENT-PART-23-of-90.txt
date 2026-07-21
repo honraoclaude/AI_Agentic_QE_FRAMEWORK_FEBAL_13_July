@@ -1,0 +1,265 @@
+### PART 23 of 90 - MIGRATION-FILES-CONTENT split (5 complete files: backend/app/services/github/__init__.py ... backend/app/services/github/rest_adapter.py) ###
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/github/__init__.py
+================================================================================
+
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/github/adapter.py
+================================================================================
+"""GithubAdapter interface.
+
+The mock adapter (demo mode) and the real REST adapter are interchangeable
+behind this contract. A branch "pull" yields a flat list of PullItems — each
+already tagged with the platform ArtifactKind and carrying raw text the existing
+artifact parsers understand — so the ingest service treats GitHub, Copado and
+manual uploads identically.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+from ...models import ArtifactKind
+
+
+@dataclass
+class PullItem:
+    kind: ArtifactKind
+    filename: str
+    text: str
+    ref: str  # provenance, e.g. "acme/wealth-sfdx@feature/WLTH-101 (CI #128)"
+
+
+class GithubAdapter(ABC):
+    @abstractmethod
+    async def test_connection(self) -> dict:
+        """Returns {'ok': bool, ...diagnostics}."""
+
+    @abstractmethod
+    async def get_branch(self, repo: str, branch: str) -> dict | None:
+        """Branch head info: {name, head_sha, ...} or None if not found."""
+
+    @abstractmethod
+    async def fetch_branch_artifacts(self, repo: str, branch: str) -> list[PullItem]:
+        """Pull the branch's changed files (-> METADATA), latest CI results
+        (-> SARIF / JUNIT / COVERAGE) and a sample of changed source
+        (-> GENERIC), as a list of PullItems ready to parse and store."""
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/github/factory.py
+================================================================================
+from ...config import Settings, get_settings
+from .adapter import GithubAdapter
+from .mock_adapter import MockGithubAdapter
+
+_mock: MockGithubAdapter | None = None
+
+
+def _get_mock() -> MockGithubAdapter:
+    global _mock
+    if _mock is None:
+        _mock = MockGithubAdapter()
+    return _mock
+
+
+def get_adapter(env: Settings | None = None) -> GithubAdapter:
+    """Demo mode (or no GitHub token) -> singleton mock; otherwise the REST
+    adapter configured from .env."""
+    env = env or get_settings()
+    if env.demo_mode or not env.github_configured:
+        return _get_mock()
+    from .rest_adapter import RestGithubAdapter
+
+    return RestGithubAdapter(env)
+
+
+def reset_adapter() -> None:
+    global _mock
+    _mock = None
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/github/mock_adapter.py
+================================================================================
+"""Mock GitHub adapter for demo mode — a canned branch + CI run for the seeded
+WLTH-101 household-rollup story, so the whole connect/sync flow runs offline.
+"""
+
+import json
+
+from ...models import ArtifactKind
+from .adapter import GithubAdapter, PullItem
+
+_SOURCE = """public with sharing class HouseholdRollupService {
+    // Recalculate a household's total from its active financial accounts.
+    public static void recalculate(Id householdId) {
+        for (Account a : [SELECT Id FROM Account WHERE ParentId = :householdId]) {
+            Decimal total = 0;
+            for (FinServ__FinancialAccount__c f :
+                 [SELECT Balance__c FROM FinServ__FinancialAccount__c WHERE Household__c = :a.Id]) {
+                total += f.Balance__c;   // NB: SOQL inside a loop
+            }
+            a.Household_Total__c = total;
+            update a;
+        }
+    }
+}"""
+
+_SARIF = {
+    "version": "2.1.0",
+    "runs": [{"tool": {"driver": {"name": "CodeQL"}}, "results": [
+        {"ruleId": "js/sql-in-loop", "level": "warning",
+         "message": {"text": "SOQL query inside a loop."},
+         "locations": [{"physicalLocation": {
+             "artifactLocation": {"uri": "classes/HouseholdRollupService.cls"},
+             "region": {"startLine": 6}}}]},
+    ]}],
+}
+
+_JUNIT = ('<testsuites><testsuite name="apex">'
+          '<testcase name="rollupSumsActiveAccounts" classname="HouseholdRollupServiceTest"/>'
+          '<testcase name="excludesClosedAccounts" classname="HouseholdRollupServiceTest"/>'
+          '<testcase name="recalcUnderBulkLoad" classname="HouseholdRollupServiceTest">'
+          '<failure message="System.LimitException: Too many SOQL queries: 101">stack</failure>'
+          '</testcase></testsuite></testsuites>')
+
+_COVERAGE = json.dumps({"overall_percent": 82.0, "classes": [
+    {"name": "HouseholdRollupService", "coverage_percent": 78.0},
+    {"name": "FinancialAccountTriggerHandler", "coverage_percent": 88.0},
+]})
+
+_COMPONENTS = json.dumps([
+    "ApexClass: HouseholdRollupService",
+    "ApexTrigger: FinancialAccountTrigger",
+    "LightningComponentBundle: householdSummary",
+])
+
+
+class MockGithubAdapter(GithubAdapter):
+    async def test_connection(self) -> dict:
+        return {"ok": True, "mode": "mock"}
+
+    async def get_branch(self, repo: str, branch: str) -> dict | None:
+        return {"name": branch or "feature/WLTH-101", "head_sha": "a1b2c3d", "repo": repo}
+
+    async def fetch_branch_artifacts(self, repo: str, branch: str) -> list[PullItem]:
+        base = f"{repo or 'acme/wealth-sfdx'}@{branch or 'feature/WLTH-101'}"
+        return [
+            PullItem(ArtifactKind.METADATA, "changed-files.json", _COMPONENTS, f"{base} (diff)"),
+            PullItem(ArtifactKind.SARIF, "codeql.sarif", json.dumps(_SARIF), f"{base} (CI #128)"),
+            PullItem(ArtifactKind.JUNIT, "apex-tests.xml", _JUNIT, f"{base} (CI #128)"),
+            PullItem(ArtifactKind.COVERAGE, "coverage.json", _COVERAGE, f"{base} (CI #128)"),
+            PullItem(ArtifactKind.GENERIC, "HouseholdRollupService.cls", _SOURCE, f"{base} (source)"),
+        ]
+
+================================================================================
+Area: Backend services
+File path: backend/app/services/github/rest_adapter.py
+================================================================================
+"""Real GitHub REST adapter (exercised when GITHUB_ENABLED + a token are set).
+
+Demo-first build: changed files -> METADATA, changed source -> GENERIC, and
+code-scanning SARIF are implemented against the public REST API; pulling JUnit /
+coverage from Actions artifacts (which are zipped) is left as a documented
+extension and simply omitted if unavailable — the flow degrades gracefully.
+"""
+
+import base64
+import json
+
+import httpx
+
+from ...config import Settings
+from ...models import ArtifactKind
+from .adapter import GithubAdapter, PullItem
+
+_SOURCE_EXT = (".cls", ".trigger", ".js", ".ts", ".html")
+_MAX_SOURCE_FILES = 3
+
+
+class GithubApiError(RuntimeError):
+    def __init__(self, status_code: int, detail: str = ""):
+        self.status_code = status_code
+        super().__init__(f"GitHub API {status_code}: {detail}")
+
+
+class RestGithubAdapter(GithubAdapter):
+    def __init__(self, env: Settings):
+        self._base = env.github_api_url.rstrip("/")
+        self._headers = {
+            "Authorization": f"Bearer {env.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    async def _get(self, client: httpx.AsyncClient, path: str, **kwargs):
+        r = await client.get(f"{self._base}{path}", headers=self._headers, **kwargs)
+        if r.status_code >= 400:
+            raise GithubApiError(r.status_code, r.text[:200])
+        return r
+
+    async def test_connection(self) -> dict:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await self._get(client, "/rate_limit")
+            return {"ok": True, "rate": r.json().get("rate", {})}
+
+    async def get_branch(self, repo: str, branch: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                r = await self._get(client, f"/repos/{repo}/branches/{branch}")
+            except GithubApiError as exc:
+                if exc.status_code == 404:
+                    return None
+                raise
+            data = r.json()
+            return {"name": data["name"], "head_sha": data["commit"]["sha"], "repo": repo}
+
+    async def fetch_branch_artifacts(self, repo: str, branch: str) -> list[PullItem]:
+        base = f"{repo}@{branch}"
+        items: list[PullItem] = []
+        async with httpx.AsyncClient(timeout=30) as client:
+            head = await self._get(client, f"/repos/{repo}/branches/{branch}")
+            sha = head.json()["commit"]["sha"]
+            commit = (await self._get(client, f"/repos/{repo}/commits/{sha}")).json()
+            files = commit.get("files", []) or []
+
+            components = [f["filename"] for f in files]
+            items.append(PullItem(
+                ArtifactKind.METADATA, "changed-files.json",
+                json.dumps(components), f"{base} (diff {sha[:7]})",
+            ))
+
+            for f in [x for x in files if x["filename"].endswith(_SOURCE_EXT)][:_MAX_SOURCE_FILES]:
+                try:
+                    c = (await self._get(
+                        client, f"/repos/{repo}/contents/{f['filename']}",
+                        params={"ref": branch})).json()
+                    text = base64.b64decode(c.get("content", "")).decode("utf-8", "replace")
+                    items.append(PullItem(
+                        ArtifactKind.GENERIC, f["filename"].split("/")[-1], text, f"{base} (source)"))
+                except (GithubApiError, ValueError):
+                    continue
+
+            # Code-scanning SARIF (CodeQL etc.), best-effort.
+            try:
+                analyses = (await self._get(
+                    client, f"/repos/{repo}/code-scanning/analyses",
+                    params={"ref": f"refs/heads/{branch}", "per_page": 1})).json()
+                if analyses:
+                    aid = analyses[0]["id"]
+                    sarif = await client.get(
+                        f"{self._base}/repos/{repo}/code-scanning/analyses/{aid}",
+                        headers={**self._headers, "Accept": "application/sarif+json"})
+                    if sarif.status_code < 400:
+                        items.append(PullItem(
+                            ArtifactKind.SARIF, "code-scanning.sarif", sarif.text,
+                            f"{base} (code-scanning {aid})"))
+            except GithubApiError:
+                pass
+
+        return items
+

@@ -1,0 +1,325 @@
+### PART 1 of 90 - MIGRATION-FILES-CONTENT split (7 complete files: setup.ps1 ... backend/app/database.py) ###
+
+================================================================================
+Area: Bootstrap
+File path: setup.ps1
+================================================================================
+<#
+.SYNOPSIS
+    One-shot local setup for the AI Agentic QE Platform (no admin required).
+
+.DESCRIPTION
+    Creates the backend Python virtual environment, installs backend and
+    frontend dependencies, and seeds backend\.env from the example if missing.
+    Safe to re-run (idempotent). Does NOT need administrator rights.
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\setup.ps1
+
+.NOTES
+    Prerequisites (install per-user, no admin): Python 3.11+ on PATH, and
+    Node.js/npm on PATH. See docs\RESTRICTED-LAPTOP.md.
+#>
+
+$ErrorActionPreference = "Stop"
+
+# Always operate relative to this script's location, wherever it is run from.
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Backend = Join-Path $Root "backend"
+$Frontend = Join-Path $Root "frontend"
+
+function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
+function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
+function Write-Warn2($msg){ Write-Host "    $msg" -ForegroundColor Yellow }
+
+function Get-Exe($name) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+Write-Host "AI Agentic QE Platform - local setup" -ForegroundColor White
+Write-Host "Repo root: $Root"
+
+# --- Prerequisite checks -------------------------------------------------
+Write-Step "Checking prerequisites"
+
+$python = Get-Exe "python"
+if (-not $python) { $python = Get-Exe "py" }
+if (-not $python) {
+    throw "Python not found on PATH. Install Python 3.11+ per-user (tick 'Add python.exe to PATH') and re-run. See docs\RESTRICTED-LAPTOP.md."
+}
+$pyVer = (& $python --version) 2>&1
+Write-Ok "Python: $pyVer ($python)"
+
+$npm = Get-Exe "npm"
+if (-not $npm) {
+    throw "npm not found on PATH. Extract the Node.js Windows .zip and add its folder to your user PATH, then re-run. See docs\RESTRICTED-LAPTOP.md."
+}
+$npmVer = (& $npm --version) 2>&1
+Write-Ok "npm: $npmVer ($npm)"
+
+# --- Backend: venv + deps ------------------------------------------------
+Write-Step "Backend: virtual environment"
+$venv = Join-Path $Backend ".venv"
+$venvPy = Join-Path $venv "Scripts\python.exe"
+if (Test-Path $venvPy) {
+    Write-Ok ".venv already exists - reusing"
+} else {
+    & $python -m venv $venv
+    Write-Ok "created .venv"
+}
+
+Write-Step "Backend: installing dependencies (pip)"
+& $venvPy -m pip install --upgrade pip --quiet
+& $venvPy -m pip install -r (Join-Path $Backend "requirements.txt")
+Write-Ok "backend dependencies installed"
+
+# --- Backend: .env -------------------------------------------------------
+Write-Step "Backend: .env configuration"
+$envFile = Join-Path $Backend ".env"
+$envExample = Join-Path $Backend ".env.example"
+if (Test-Path $envFile) {
+    Write-Ok ".env already exists - left untouched"
+} elseif (Test-Path $envExample) {
+    Copy-Item $envExample $envFile
+    Write-Warn2 "created backend\.env from .env.example - it starts in DEMO mode."
+    Write-Warn2 "Edit it to add ANTHROPIC_API_KEY / Jira creds and set DEMO_MODE=false for live mode."
+} else {
+    Write-Warn2 ".env.example not found - skipping .env creation."
+}
+
+# --- Frontend: deps ------------------------------------------------------
+Write-Step "Frontend: installing dependencies (npm)"
+Push-Location $Frontend
+try {
+    & $npm install
+    Write-Ok "frontend dependencies installed"
+} finally {
+    Pop-Location
+}
+
+# --- Done ----------------------------------------------------------------
+Write-Host "`nSetup complete." -ForegroundColor Green
+Write-Host @"
+
+Next steps - run these in two separate terminals:
+
+  # Terminal 1 - backend
+  cd "$Backend"
+  .\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+  # Terminal 2 - frontend
+  cd "$Frontend"
+  npm run dev
+
+Then open http://localhost:5173  (backend health: http://127.0.0.1:8000/health)
+"@ -ForegroundColor White
+
+================================================================================
+Area: Config (root)
+File path: .gitignore
+================================================================================
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+backend/pact_qe.db
+backend/.env
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local tooling
+.claude/
+frontend/tsconfig.tsbuildinfo
+
+================================================================================
+Area: Config (backend)
+File path: backend/.env.example
+================================================================================
+# --- Core ---
+# SQLite for v1. Postgres swap: postgresql+asyncpg://user:pass@host:5432/pact_qe
+DATABASE_URL=sqlite+aiosqlite:///./pact_qe.db
+DEMO_MODE=true
+
+# --- Anthropic (Step 3: agent engine) ---
+ANTHROPIC_API_KEY=
+REASONING_MODEL=claude-sonnet-4-6
+CLASSIFICATION_MODEL=claude-haiku-4-5
+
+# --- Jira (Step 2: real REST adapter; unused while DEMO_MODE=true) ---
+JIRA_BASE_URL=
+JIRA_EMAIL=
+JIRA_API_TOKEN=
+JIRA_PROJECT_KEY=WLTH
+JIRA_BOARD_ID=0
+JIRA_JQL_OVERRIDE=
+SYNC_ENABLED=false
+SYNC_INTERVAL_MINUTES=15
+
+# --- Copado CI/CD (ingest — Phase 1; unused while DEMO_MODE=true) ---
+COPADO_ENABLED=false
+COPADO_BASE_URL=
+COPADO_API_TOKEN=
+# Shared secret Copado Functions send as the X-Copado-Signature header.
+COPADO_WEBHOOK_SECRET=
+
+# --- GitHub branch ingestion (unused while DEMO_MODE=true) ---
+GITHUB_ENABLED=false
+GITHUB_API_URL=https://api.github.com
+# Fine-grained PAT with contents:read + actions:read on the target repo.
+GITHUB_TOKEN=
+
+================================================================================
+Area: Backend deps
+File path: backend/requirements.txt
+================================================================================
+fastapi>=0.115
+python-multipart>=0.0.9
+uvicorn[standard]>=0.30
+sqlalchemy[asyncio]>=2.0.30
+aiosqlite>=0.20
+pydantic>=2.7
+pydantic-settings>=2.3
+httpx>=0.27
+anthropic>=0.40
+
+# dev / test
+pytest>=8.2
+pytest-asyncio>=0.23
+
+================================================================================
+Area: Backend app (core)
+File path: backend/app/__init__.py
+================================================================================
+
+
+================================================================================
+Area: Backend app (core)
+File path: backend/app/config.py
+================================================================================
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """All runtime configuration. Secrets come from .env only — never the DB."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Core
+    database_url: str = "sqlite+aiosqlite:///./pact_qe.db"
+    demo_mode: bool = True
+
+    # Anthropic (agent engine — Step 3)
+    anthropic_api_key: str = ""
+    reasoning_model: str = "claude-sonnet-4-6"
+    classification_model: str = "claude-haiku-4-5"
+
+    # Jira (real REST adapter — Step 2)
+    jira_base_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+    jira_project_key: str = "WLTH"
+    jira_board_id: int = 0
+    jira_jql_override: str = ""
+    sync_enabled: bool = False
+    sync_interval_minutes: int = 15
+
+    # Copado CI/CD (ingest — Phase 1). Secrets via .env only.
+    copado_enabled: bool = False
+    copado_base_url: str = ""
+    copado_api_token: str = ""
+    copado_webhook_secret: str = ""
+
+    # GitHub branch ingestion. Secrets via .env only.
+    github_enabled: bool = False
+    github_api_url: str = "https://api.github.com"
+    github_token: str = ""
+
+    @property
+    def jira_configured(self) -> bool:
+        return bool(self.jira_base_url and self.jira_email and self.jira_api_token)
+
+    @property
+    def copado_configured(self) -> bool:
+        return bool(self.copado_enabled and self.copado_base_url and self.copado_api_token)
+
+    @property
+    def github_configured(self) -> bool:
+        return bool(self.github_enabled and self.github_token)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+================================================================================
+Area: Backend app (core)
+File path: backend/app/database.py
+================================================================================
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
+
+from .config import get_settings
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+engine = create_async_engine(get_settings().database_url, echo=False)
+SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# audit_events is append-only. Belt and braces: no update/delete endpoints,
+# no ORM mutation paths, AND database triggers that reject UPDATE/DELETE.
+AUDIT_APPEND_ONLY_TRIGGERS_SQLITE = [
+    """
+    CREATE TRIGGER IF NOT EXISTS audit_events_no_update
+    BEFORE UPDATE ON audit_events
+    BEGIN
+        SELECT RAISE(ABORT, 'audit_events is append-only');
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS audit_events_no_delete
+    BEFORE DELETE ON audit_events
+    BEGIN
+        SELECT RAISE(ABORT, 'audit_events is append-only');
+    END;
+    """,
+]
+
+
+async def create_schema(conn) -> None:
+    """Create tables + append-only triggers. Shared by app startup and tests."""
+    await conn.run_sync(Base.metadata.create_all)
+    if conn.dialect.name == "sqlite":
+        for ddl in AUDIT_APPEND_ONLY_TRIGGERS_SQLITE:
+            await conn.execute(text(ddl))
+    # Postgres equivalent (Step 5 / migration): a BEFORE UPDATE OR DELETE trigger
+    # raising an exception; wired in via Alembic when the Postgres swap happens.
+
+
+async def init_db() -> None:
+    from . import models  # noqa: F401 — register all mappings
+
+    async with engine.begin() as conn:
+        await create_schema(conn)
+
+
+async def get_session():
+    async with SessionLocal() as session:
+        yield session
+

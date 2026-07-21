@@ -1,0 +1,125 @@
+### PART 75 of 90 - MIGRATION-FILES-CONTENT split (1 complete files: frontend/src/components/PushQueueView.tsx ... frontend/src/components/PushQueueView.tsx) ###
+
+================================================================================
+Area: Frontend source
+File path: frontend/src/components/PushQueueView.tsx
+================================================================================
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "../api";
+import type { PushItem, PushStatus } from "../types";
+import { Badge, Button, fmtTime, Modal, useToast } from "../ui";
+
+const STATUS_META: Record<PushStatus, string> = {
+  DRAFT: "border-line text-ink-dim",
+  APPROVED: "border-accent/50 text-accent",
+  SENT: "border-ok/50 text-ok bg-ok/10",
+  FAILED: "border-bad/50 text-bad bg-bad/10",
+  RETRYING: "border-warn/50 text-warn",
+};
+
+export function PushQueueView({ actor }: { actor: string }) {
+  const [preview, setPreview] = useState<PushItem | null>(null);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const pushQuery = useQuery({ queryKey: ["push"], queryFn: () => api.pushQueue() });
+
+  const action = useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: "approve" | "retry" }) =>
+      kind === "approve" ? api.approvePush(id, actor) : api.retryPush(id, actor),
+    onSuccess: (item) => {
+      queryClient.invalidateQueries({ queryKey: ["push"] });
+      setPreview(null);
+      if (item.status === "SENT") toast("ok", `Sent to ${item.payload.jira_key}`);
+      else toast("error", `Failed: ${item.last_error}`);
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+
+  const items = pushQuery.data ?? [];
+
+  return (
+    <div className="mx-auto max-w-5xl p-5">
+      <p className="mb-4 text-[11px] leading-relaxed text-ink-faint">
+        Every outbound Jira post lives here: drafts await your approval (with a
+        preview of exactly what will be posted), failures keep their error and can
+        be retried — approved posts are never lost.
+      </p>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-2.5 text-xs"
+          >
+            <Badge className={STATUS_META[item.status]}>{item.status}</Badge>
+            <Badge className="border-line text-ink-dim">{item.push_type}</Badge>
+            <span className="font-mono text-accent">{String(item.payload.jira_key ?? "")}</span>
+            <span className="truncate text-ink-dim">
+              {String(item.payload.kind ?? "").replaceAll("_", " ")}
+            </span>
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
+              {item.attempts > 0 && `${item.attempts} attempt${item.attempts > 1 ? "s" : ""} · `}
+              {fmtTime(item.updated_at)}
+            </span>
+            {item.payload.preview_text != null && (
+              <Button variant="ghost" onClick={() => setPreview(item)}>
+                Preview
+              </Button>
+            )}
+            {item.status === "DRAFT" && (
+              <Button
+                variant="primary"
+                busy={action.isPending}
+                onClick={() => action.mutate({ id: item.id, kind: "approve" })}
+              >
+                Approve &amp; send
+              </Button>
+            )}
+            {item.status === "FAILED" && (
+              <Button
+                variant="danger"
+                busy={action.isPending}
+                onClick={() => action.mutate({ id: item.id, kind: "retry" })}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
+        ))}
+        {items.length === 0 && !pushQuery.isLoading && (
+          <p className="py-10 text-center text-xs text-ink-faint">
+            Queue is empty — accept an agent run or sign off a gate to create pushes.
+          </p>
+        )}
+      </div>
+
+      {preview && (
+        <Modal title={`Preview — ${preview.push_type}`} onClose={() => setPreview(null)} wide>
+          {preview.last_error && (
+            <div className="mb-3 rounded border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-[11px] text-bad">
+              Last error: {preview.last_error}
+            </div>
+          )}
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded border border-line bg-bg p-3 font-mono text-[11px] leading-relaxed text-ink">
+            {String(preview.payload.preview_text ?? "")}
+          </pre>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPreview(null)}>
+              Close
+            </Button>
+            {preview.status === "DRAFT" && (
+              <Button
+                variant="primary"
+                busy={action.isPending}
+                onClick={() => action.mutate({ id: preview.id, kind: "approve" })}
+              >
+                Approve &amp; send to Jira
+              </Button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+

@@ -1,0 +1,262 @@
+### PART 55 of 90 - MIGRATION-FILES-CONTENT split (2 complete files: backend/tests/test_pipeline_view.py ... backend/tests/test_push.py) ###
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_pipeline_view.py
+================================================================================
+"""Pipeline DAG projection: nodes for all agents, chaining + artifact edges,
+gate statuses — a pure read-model."""
+
+from sqlalchemy import select
+
+from app.models import AGENT_UPSTREAM_INPUTS, Artifact, ArtifactKind, Story
+from app.services import pipeline_view, workflow
+from app.services.agents.registry import AGENTS
+from app.services.jira import sync_service
+
+
+async def _seed(session, adapter) -> Story:
+    await sync_service.sync_from_jira(session, adapter, actor="test")
+    await session.commit()
+    return (
+        await session.execute(select(Story).where(Story.jira_key == "WLTH-101"))
+    ).scalar_one()
+
+
+async def test_projection_covers_all_agents_and_edges(session, adapter):
+    story = await _seed(session, adapter)
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    await workflow.approve_and_run(session, run.id, approver="Test Lead")
+
+    view = await pipeline_view.build(session, story)
+    assert {n["key"] for n in view["nodes"]} == set(AGENTS)
+    sq = next(n for n in view["nodes"] if n["key"] == "story_quality")
+    assert sq["status"] == "COMPLETED" and sq["verdict"] in ("PASS", "WARN", "FAIL")
+    # Never-run agents still appear (status None) — the full pipeline is visible.
+    assert any(n["status"] is None for n in view["nodes"])
+    # Every upstream pair is an edge; three_amigos wiring included.
+    upstream_edges = {(e["source"], e["target"]) for e in view["edges"]
+                      if e["kind"] == "upstream"}
+    assert ("three_amigos", "bdd_generator") in upstream_edges
+    assert ("story_quality", "three_amigos") in upstream_edges
+    expected = sum(len(v) for v in AGENT_UPSTREAM_INPUTS.values())
+    assert len(upstream_edges) == expected
+    # Gates keyed by phase.
+    assert "REFINEMENT" in view["gates"]
+
+
+async def test_artifact_sources_become_feed_edges(session, adapter):
+    story = await _seed(session, adapter)
+    session.add(Artifact(
+        story_id=story.id, kind=ArtifactKind.JUNIT, filename="results.xml",
+        content_type="text/xml", size_bytes=10, parsed={}, summary="s",
+        uploaded_by="t", source="COPADO",
+    ))
+    await session.flush()
+
+    view = await pipeline_view.build(session, story)
+    assert view["sources"] == [{"id": "COPADO", "kinds": ["JUNIT"]}]
+    art_edges = [e for e in view["edges"] if e["kind"] == "artifact"]
+    targets = {e["target"] for e in art_edges}
+    assert all(e["source"] == "src:COPADO" for e in art_edges)
+    # JUNIT consumers per AGENT_ARTIFACT_KINDS.
+    assert "test_execution_analyst" in targets and "defect_triage" in targets
+    assert "apex_coverage" not in targets  # consumes COVERAGE, not JUNIT
+
+================================================================================
+Area: Backend tests
+File path: backend/tests/test_push.py
+================================================================================
+import base64
+import json
+
+import pytest
+from sqlalchemy import select
+
+from app.models import AuditEvent, Phase, PushStatus, PushType, Story
+from app.services import settings_service, workflow
+from app.services.agents.registry import agents_for_phase
+from app.services.jira import push_service, sync_service
+
+PLATFORM = "http://localhost:5173"
+
+
+async def _seed(session, adapter) -> Story:
+    await sync_service.sync_from_jira(session, adapter, actor="test")
+    await session.commit()
+    return (
+        await session.execute(select(Story).where(Story.jira_key == "WLTH-101"))
+    ).scalar_one()
+
+
+async def _accepted_first_run(session, story):
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    await workflow.approve_and_run(session, run.id, approver="Test Lead")
+    await workflow.accept_run(session, run.id, actor="Test Lead")
+    return run
+
+
+async def test_draft_requires_accepted_run(session, adapter):
+    story = await _seed(session, adapter)
+    run = await workflow.latest_run(session, story.id, "story_quality")
+    # Run has not even executed — drafting a summary is illegal.
+    with pytest.raises(workflow.WorkflowError):
+        await push_service.draft_agent_summary(session, run.id, "Test Lead", PLATFORM)
+
+
+async def test_draft_approve_send_happy_path(session, adapter):
+    story = await _seed(session, adapter)
+    run = await _accepted_first_run(session, story)
+
+    item = await push_service.draft_agent_summary(session, run.id, "Test Lead", PLATFORM)
+    assert item.status == PushStatus.DRAFT
+    # Preview shows exactly what will be posted, before anything is sent.
+    assert "Story Quality Agent" in item.payload["preview_text"]
+    assert adapter.posted_comments == []
+
+    await push_service.approve_and_send(session, adapter, item.id, "Test Lead")
+    await session.commit()
+    assert item.status == PushStatus.SENT
+    assert item.approved_by == "Test Lead"
+    assert len(adapter.posted_comments) == 1
+    assert adapter.posted_comments[0]["key"] == "WLTH-101"
+
+    event_types = {
+        e.event_type
+        for e in (
+            await session.execute(
+                select(AuditEvent).where(AuditEvent.entity_id == item.id)
+            )
+        ).scalars()
+    }
+    assert {"PUSH_DRAFTED", "PUSH_APPROVED", "PUSH_SENT"} <= event_types
+
+
+async def test_failed_push_goes_to_retry_queue_and_recovers(session, adapter):
+    story = await _seed(session, adapter)
+    run = await _accepted_first_run(session, story)
+    item = await push_service.draft_agent_summary(session, run.id, "Test Lead", PLATFORM)
+
+    adapter.fail_pushes = True
+    await push_service.approve_and_send(session, adapter, item.id, "Test Lead")
+    assert item.status == PushStatus.FAILED
+    assert item.attempts == 1
+    assert "simulated Jira outage" in item.last_error
+
+    # Approved post is never lost — retry succeeds once Jira is back.
+    adapter.fail_pushes = False
+    await push_service.retry(session, adapter, item.id, "Test Lead")
+    assert item.status == PushStatus.SENT
+    assert item.attempts == 2
+    assert len(adapter.posted_comments) == 1
+
+    event_types = [
+        e.event_type
+        for e in (
+            await session.execute(
+                select(AuditEvent)
+                .where(AuditEvent.entity_id == item.id)
+                .order_by(AuditEvent.id)
+            )
+        ).scalars()
+    ]
+    assert event_types == [
+        "PUSH_DRAFTED",
+        "PUSH_APPROVED",
+        "PUSH_FAILED",
+        "PUSH_RETRIED",
+        "PUSH_SENT",
+    ]
+
+
+async def _accept_phase(session, story, phase):
+    for agent in agents_for_phase(phase):
+        run = await workflow.latest_run(session, story.id, agent.key)
+        await workflow.approve_and_run(session, run.id, approver="Test Lead")
+        await workflow.accept_run(session, run.id, actor="Test Lead")
+
+
+async def test_gate_signoff_auto_pushes_comment_label_and_transition(session, adapter):
+    story = await _seed(session, adapter)
+    await _accept_phase(session, story, Phase.REFINEMENT)
+    gate = await workflow.gate_for_phase(session, story.id, Phase.REFINEMENT)
+    await workflow.signoff_gate(
+        session, gate.id, "Priya Sharma", "Product Owner", "Gate 1 criteria met."
+    )
+
+    cfg = await settings_service.update_settings(
+        session,
+        {"gates": {"REFINEMENT": {"transition_name": "Ready for Dev"}}},
+        actor="test",
+    )
+    items = await push_service.handle_gate_signoff(
+        session, adapter, story, gate, cfg, actor="Priya Sharma"
+    )
+    await session.commit()
+
+    by_type = {i.push_type: i for i in items}
+    assert set(by_type) == {PushType.COMMENT, PushType.LABEL, PushType.TRANSITION}
+    assert all(i.status == PushStatus.SENT for i in items)
+    assert all(i.approved_by == "Priya Sharma" for i in items)
+
+    assert adapter.posted_comments[0]["key"] == "WLTH-101"
+    assert adapter.applied_labels[0]["label"] == "qe-gate-1-passed"
+    # Transition ID resolved dynamically by name, never hardcoded.
+    assert adapter.transitions_done[0]["transition_id"] == "11"
+    assert by_type[PushType.TRANSITION].payload["resolved_transition_id"] == "11"
+
+
+async def test_unavailable_transition_fails_cleanly(session, adapter):
+    story = await _seed(session, adapter)
+    await _accept_phase(session, story, Phase.REFINEMENT)
+    gate = await workflow.gate_for_phase(session, story.id, Phase.REFINEMENT)
+    await workflow.signoff_gate(session, gate.id, "PO", "Product Owner", "ok")
+
+    cfg = await settings_service.update_settings(
+        session,
+        {
+            "gates": {
+                "REFINEMENT": {
+                    "auto_post_comment": False,
+                    "apply_label": False,
+                    "transition_name": "Nonexistent Status",
+                }
+            }
+        },
+        actor="test",
+    )
+    items = await push_service.handle_gate_signoff(
+        session, adapter, story, gate, cfg, actor="PO"
+    )
+    assert len(items) == 1
+    assert items[0].status == PushStatus.FAILED
+    assert "not available" in items[0].last_error
+    assert adapter.transitions_done == []
+
+
+async def test_release_gate_attaches_audit_pack(session, adapter):
+    story = await _seed(session, adapter)
+    for phase in (Phase.REFINEMENT, Phase.DEVELOPMENT, Phase.TESTING, Phase.RELEASE):
+        await _accept_phase(session, story, phase)
+        gate = await workflow.gate_for_phase(session, story.id, phase)
+        await workflow.signoff_gate(session, gate.id, "Approver", "QE Lead", "done")
+    await session.commit()
+
+    cfg = await settings_service.get_all(session)
+    release_gate = await workflow.gate_for_phase(session, story.id, Phase.RELEASE)
+    items = await push_service.handle_gate_signoff(
+        session, adapter, story, release_gate, cfg, actor="Approver"
+    )
+    await session.commit()
+
+    attachment = next(i for i in items if i.push_type == PushType.ATTACHMENT)
+    assert attachment.status == PushStatus.SENT
+    assert adapter.attachments[0]["filename"] == "WLTH-101-release-audit-pack.json"
+
+    pack = json.loads(base64.b64decode(attachment.payload["content_b64"]))
+    assert pack["story"]["jira_key"] == "WLTH-101"
+    assert len(pack["gates"]) == 4
+    assert all(g["status"] == "SIGNED_OFF" for g in pack["gates"])
+    assert len(pack["agent_runs"]) == 26
+    assert pack["audit_chain_verification"]["valid"] is True
+

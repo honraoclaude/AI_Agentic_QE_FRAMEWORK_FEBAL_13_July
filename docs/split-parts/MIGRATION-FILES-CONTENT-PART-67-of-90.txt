@@ -1,0 +1,263 @@
+### PART 67 of 90 - MIGRATION-FILES-CONTENT split (5 complete files: frontend/package.json ... frontend/src/App.tsx) ###
+
+================================================================================
+Area: Frontend deps
+File path: frontend/package.json
+================================================================================
+{
+  "name": "pact-qe-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.51.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0"
+  }
+}
+
+================================================================================
+Area: Frontend config
+File path: frontend/index.html
+================================================================================
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Agentic QE Platform — AI That Tests. Humans Who Trust.</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+================================================================================
+Area: Frontend config
+File path: frontend/tsconfig.json
+================================================================================
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
+}
+
+================================================================================
+Area: Frontend config
+File path: frontend/vite.config.ts
+================================================================================
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/ws": { target: "ws://127.0.0.1:8000", ws: true },
+    },
+  },
+});
+
+================================================================================
+Area: Frontend source
+File path: frontend/src/App.tsx
+================================================================================
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "./api";
+import { AuditView } from "./components/AuditView";
+import { InsightsView } from "./components/InsightsView";
+import { ReportsView } from "./components/ReportsView";
+import { RiskRegisterView } from "./components/RiskRegisterView";
+import { PipelineBoard } from "./components/PipelineBoard";
+import { PushQueueView } from "./components/PushQueueView";
+import { SettingsPage } from "./components/SettingsPage";
+import { WorkQueue } from "./components/WorkQueue";
+import { ROLES, type Role } from "./types";
+import { Button, inputCls, useToast } from "./ui";
+import { useLiveUpdates } from "./ws";
+
+type Tab = "work" | "board" | "insights" | "risks" | "reports" | "push" | "audit" | "settings";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "work", label: "My Work" },
+  { id: "board", label: "Pipeline" },
+  { id: "insights", label: "Agent Insights" },
+  { id: "risks", label: "Risk Register" },
+  { id: "reports", label: "Reports" },
+  { id: "push", label: "Jira Push Queue" },
+  { id: "audit", label: "Audit Trail" },
+  { id: "settings", label: "Settings" },
+];
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>("work");
+  const [actor, setActor] = useState(() => localStorage.getItem("pact_actor") ?? "");
+  const [role, setRole] = useState<Role>(
+    () => (localStorage.getItem("pact_role") as Role) || "QE Lead",
+  );
+  const connected = useLiveUpdates();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const workQuery = useQuery({
+    queryKey: ["work", role],
+    queryFn: () => api.work(role),
+  });
+  const workCount = workQuery.data?.items.length ?? 0;
+
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: async () => (await fetch("/health")).json() as Promise<{ demo_mode: boolean }>,
+    refetchInterval: 60000,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.sync(actor || "unnamed-user"),
+    onSuccess: (r) => {
+      toast(
+        "ok",
+        `Sync complete: ${r.total} stories — ${r.created} new, ${r.updated} updated` +
+          (r.out_of_scope ? `, ${r.out_of_scope} out of scope` : "") +
+          (r.flagged_conflicts.length
+            ? `. Changed since agent run: ${r.flagged_conflicts.join(", ")}`
+            : ""),
+      );
+      queryClient.invalidateQueries();
+    },
+    onError: (e: Error) => toast("error", `Sync failed: ${e.message}`),
+  });
+
+  const setActorPersist = (v: string) => {
+    setActor(v);
+    localStorage.setItem("pact_actor", v);
+  };
+  const setRolePersist = (v: Role) => {
+    setRole(v);
+    localStorage.setItem("pact_role", v);
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex items-center gap-4 border-b border-line bg-panel/80 px-5 py-3 backdrop-blur">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-lg font-bold tracking-tight text-accent">
+            AI Agentic <span className="text-ink">QE Platform</span>
+          </span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
+            AI That Tests. Humans Who Trust.
+          </span>
+        </div>
+
+        <nav className="flex gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                tab === t.id
+                  ? "bg-accent/15 text-accent"
+                  : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+              }`}
+            >
+              {t.label}
+              {t.id === "work" && workCount > 0 && (
+                <span className="rounded-full bg-warn/20 px-1.5 text-[10px] font-bold text-warn">
+                  {workCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-3">
+          {health.data?.demo_mode && (
+            <span className="rounded border border-warn/40 bg-warn/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warn">
+              Demo mode
+            </span>
+          )}
+          <span
+            title={connected ? "Live updates connected" : "Reconnecting — polling fallback active"}
+            className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-faint"
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-warn animate-pulse-dot"}`}
+            />
+            {connected ? "Live" : "Polling"}
+          </span>
+          <select
+            value={role}
+            onChange={(e) => setRolePersist(e.target.value as Role)}
+            title="Your role — drives your work queue"
+            className={`${inputCls} w-44`}
+          >
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <input
+            value={actor}
+            onChange={(e) => setActorPersist(e.target.value)}
+            placeholder="Your name (required for actions)"
+            className={`${inputCls} w-52`}
+          />
+          <Button
+            variant="primary"
+            busy={syncMutation.isPending}
+            onClick={() => syncMutation.mutate()}
+          >
+            ⟳ Sync from Jira
+          </Button>
+        </div>
+      </header>
+
+      <main className="min-h-0 flex-1 overflow-auto">
+        {tab === "work" && (
+          <WorkQueue role={role} actor={actor} onGoToPush={() => setTab("push")} />
+        )}
+        {tab === "board" && <PipelineBoard actor={actor} />}
+        {tab === "insights" && <InsightsView actor={actor} />}
+        {tab === "risks" && <RiskRegisterView actor={actor} />}
+        {tab === "reports" && <ReportsView actor={actor} />}
+        {tab === "push" && <PushQueueView actor={actor} />}
+        {tab === "audit" && <AuditView />}
+        {tab === "settings" && <SettingsPage actor={actor} />}
+      </main>
+    </div>
+  );
+}
+
