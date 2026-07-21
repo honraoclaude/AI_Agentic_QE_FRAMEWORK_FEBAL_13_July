@@ -66,7 +66,7 @@ export function InsightsView({ actor }: { actor: string }) {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <h2 className="mb-1 text-sm font-semibold text-ink">Agent Performance & Human Feedback</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Agent Performance & Human Feedback</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Learned from the decisions humans already make — Accept, Reject and Re-run-with-guidance.
         A low trust score means humans frequently override that agent; act on it by tuning its prompt.
@@ -154,7 +154,7 @@ function EvalScorecardSection() {
 
   return (
     <div className="mb-8">
-      <h2 className="mb-1 text-sm font-semibold text-ink">Eval Scorecard</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Eval Scorecard</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         The golden-dataset harness, graded live against the demo path — expert-labelled
         cases, not vibes. Demo-path only today (regression gate for the fixture
@@ -269,7 +269,7 @@ function FlakyIntel({ actor }: { actor: string }) {
 
   return (
     <div className="mt-8">
-      <h2 className="mb-1 text-sm font-semibold text-ink">Flaky-Test Intelligence</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Flaky-Test Intelligence</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Cross-run memory: recurring failure signatures fingerprinted across runs and
         stories. Known flakes are fed back to the Test Execution Analyst and Defect
@@ -403,7 +403,7 @@ function OperationalHealth() {
   const s = data.summary;
   return (
     <div className="mt-8">
-      <h2 className="mb-1 text-sm font-semibold text-ink">Operational Health</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Operational Health</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         The SRE layer: failure rates, latency, token spend and reliability per
         prompt version — did the last prompt bump regress?

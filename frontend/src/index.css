@@ -1,23 +1,74 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  --font-sans: Optima, Candara, "Noto Sans", "Segoe UI", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
 
-  /* Mission-control palette */
-  --color-bg: #0a0e17;
-  --color-panel: #111726;
-  --color-panel-2: #182034;
-  --color-line: #232d45;
-  --color-ink: #dbe4f5;
-  --color-ink-dim: #8494b4;
-  --color-ink-faint: #56648a;
+  /* Control room (dark) — the default. */
+  --color-bg: #0b0f14;
+  --color-panel: #141b23;
+  --color-panel-2: #1a222c;
+  --color-line: #212831;
+  --color-ink: #eee9db;
+  --color-ink-dim: #93a0aa;
+  --color-ink-faint: #5c6873;
 
-  --color-accent: #38bdf8; /* cyan  — running / interactive */
-  --color-ok: #34d399;     /* green — accepted / signed off */
-  --color-warn: #fbbf24;   /* amber — awaiting approval / ready */
-  --color-bad: #f87171;    /* red   — rejected / failed / blocked */
-  --color-review: #a78bfa; /* violet — completed, awaiting decision */
+  --color-accent: #86aed4;
+  --color-ok: #5fc09e;
+  --color-warn: #e0b263;
+  --color-bad: #d9695a;
+  --color-review: #a897c9; /* awaiting-decision — deliberately its own hue, not accent */
+}
+
+/* Paper ledger (light) fallback when the OS prefers light and no explicit
+   choice has been stored yet. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --color-bg: #f2ede1;
+    --color-panel: #faf7ef;
+    --color-panel-2: #eee6d3;
+    --color-line: #d9d3c5;
+    --color-ink: #241d14;
+    --color-ink-dim: #6f6353;
+    --color-ink-faint: #a49a86;
+
+    --color-accent: #3a5578;
+    --color-ok: #3f8e72;
+    --color-warn: #b8813a;
+    --color-bad: #a83b2f;
+    --color-review: #7c5a91;
+  }
+}
+
+/* An explicit choice always wins over the OS setting, in both directions. */
+:root[data-theme="dark"] {
+  --color-bg: #0b0f14;
+  --color-panel: #141b23;
+  --color-panel-2: #1a222c;
+  --color-line: #212831;
+  --color-ink: #eee9db;
+  --color-ink-dim: #93a0aa;
+  --color-ink-faint: #5c6873;
+  --color-accent: #86aed4;
+  --color-ok: #5fc09e;
+  --color-warn: #e0b263;
+  --color-bad: #d9695a;
+  --color-review: #a897c9;
+}
+:root[data-theme="light"] {
+  --color-bg: #f2ede1;
+  --color-panel: #faf7ef;
+  --color-panel-2: #eee6d3;
+  --color-line: #d9d3c5;
+  --color-ink: #241d14;
+  --color-ink-dim: #6f6353;
+  --color-ink-faint: #a49a86;
+  --color-accent: #3a5578;
+  --color-ok: #3f8e72;
+  --color-warn: #b8813a;
+  --color-bad: #a83b2f;
+  --color-review: #7c5a91;
 }
 
 html,
@@ -31,8 +82,9 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgb(56 189 248 / 0.06), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 110%, rgb(52 211 153 / 0.04), transparent);
+    radial-gradient(ellipse 80% 50% at 50% -20%, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 110%, color-mix(in srgb, var(--color-ok) 5%, transparent), transparent);
+  transition: background-color .2s ease, color .2s ease;
 }
 
 *::-webkit-scrollbar {
@@ -53,4 +105,21 @@ body {
 }
 .animate-pulse-dot {
   animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+/* Expanding-ring pulse for the "live session" eyebrow dot. */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-ok) 45%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 2.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-pulse-ring {
+    animation: none;
+  }
 }

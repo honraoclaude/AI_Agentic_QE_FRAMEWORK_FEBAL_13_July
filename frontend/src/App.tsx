@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { AuditView } from "./components/AuditView";
 import { InsightsView } from "./components/InsightsView";
@@ -10,8 +10,36 @@ import { PushQueueView } from "./components/PushQueueView";
 import { SettingsPage } from "./components/SettingsPage";
 import { WorkQueue } from "./components/WorkQueue";
 import { ROLES, type Role } from "./types";
-import { Button, inputCls, useToast } from "./ui";
+import { Badge, Button, inputCls, useToast } from "./ui";
 import { useLiveUpdates } from "./ws";
+
+type Theme = "light" | "dark";
+
+function resolveInitialTheme(): Theme {
+  try {
+    const stored = localStorage.getItem("pact_theme");
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    /* localStorage unavailable */
+  }
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function SunIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+    </svg>
+  );
+}
+function MoonIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" />
+    </svg>
+  );
+}
 
 type Tab = "work" | "board" | "insights" | "risks" | "reports" | "push" | "audit" | "settings";
 
@@ -32,9 +60,23 @@ export default function App() {
   const [role, setRole] = useState<Role>(
     () => (localStorage.getItem("pact_role") as Role) || "QE Lead",
   );
+  const [theme, setThemeState] = useState<Theme>(resolveInitialTheme);
   const connected = useLiveUpdates();
   const toast = useToast();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  const setTheme = (t: Theme) => {
+    setThemeState(t);
+    try {
+      localStorage.setItem("pact_theme", t);
+    } catch {
+      /* localStorage unavailable */
+    }
+  };
 
   const workQuery = useQuery({
     queryKey: ["work", role],
@@ -75,10 +117,14 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-line bg-panel/80 px-5 py-3 backdrop-blur">
+      <header className="flex flex-wrap items-center gap-4 border-b border-line bg-panel/80 px-5 py-3 backdrop-blur">
         <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-lg font-bold tracking-tight text-accent">
-            AI Agentic <span className="text-ink">QE Platform</span>
+          <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-ink-dim">
+            <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-ok animate-pulse-ring" />
+            Compliance Operations &middot; Live Session
+          </span>
+          <span className="font-serif text-lg font-bold italic tracking-tight text-ink">
+            AI Agentic <span className="not-italic text-accent">QE</span>
           </span>
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
             AI That Tests. Humans Who Trust.
@@ -106,7 +152,15 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="hidden items-center gap-1.5 xl:flex">
+            <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+              FCA Impact
+            </span>
+            <Badge className="border-ok/40 bg-ok/10 text-ok">Low</Badge>
+            <Badge className="border-warn/40 bg-warn/10 text-warn">Med</Badge>
+            <Badge className="border-bad/40 bg-bad/10 text-bad">High</Badge>
+          </div>
           {health.data?.demo_mode && (
             <span className="rounded border border-warn/40 bg-warn/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warn">
               Demo mode
@@ -121,6 +175,30 @@ export default function App() {
             />
             {connected ? "Live" : "Polling"}
           </span>
+          <div className="flex items-center gap-0.5 rounded-full border border-line bg-panel-2 p-0.5" role="group" aria-label="Theme">
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              aria-pressed={theme === "light"}
+              title="Light theme"
+              className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                theme === "light" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
+              }`}
+            >
+              <SunIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              aria-pressed={theme === "dark"}
+              title="Dark theme"
+              className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                theme === "dark" ? "bg-accent text-panel" : "text-ink-dim hover:text-ink"
+              }`}
+            >
+              <MoonIcon />
+            </button>
+          </div>
           <select
             value={role}
             onChange={(e) => setRolePersist(e.target.value as Role)}

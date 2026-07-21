@@ -134,9 +134,9 @@ export function WorkQueue({
   return (
     <div className="mx-auto max-w-4xl p-5">
       <div className="mb-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3">
-        <h2 className="text-sm font-semibold text-ink">
+        <h2 className="font-serif text-base font-semibold italic text-ink">
           Work queue for{" "}
-          <span className="text-accent">{role}</span>
+          <span className="not-italic text-accent">{role}</span>
         </h2>
         <p className="mt-0.5 text-[11px] leading-relaxed text-ink-dim">
           Everything currently waiting on your role — gate sign-offs assigned to

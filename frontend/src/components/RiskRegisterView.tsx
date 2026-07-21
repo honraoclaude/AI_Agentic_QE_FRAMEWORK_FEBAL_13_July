@@ -62,7 +62,7 @@ export function RiskRegisterView({ actor }: { actor: string }) {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <h2 className="mb-1 text-sm font-semibold text-ink">Risk Acceptance Register</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Risk Acceptance Register</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         The quality-debt ledger: every risk a human knowingly accepted — with owner,
         rationale and a severity-derived review date. Sign-offs are managed positions,

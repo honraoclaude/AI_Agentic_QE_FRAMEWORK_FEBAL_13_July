@@ -81,7 +81,7 @@ function ExecMi({ actor }: { actor: string }) {
 
   return (
     <div>
-      <h2 className="mb-1 text-sm font-semibold text-ink">Executive MI — per release, sealed</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Executive MI — per release, sealed</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Board-ready Consumer-Duty-style MI. A sealed pack is immutable: its canonical
         hash enters the append-only audit chain, so "the numbers the board saw" stay
@@ -267,7 +267,7 @@ function FlowView() {
   if (!d) return <div className="text-sm text-ink-faint">Loading…</div>;
   return (
     <div>
-      <h2 className="mb-1 text-sm font-semibold text-ink">Flow — where is work stuck?</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Flow — where is work stuck?</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Live. Gate cycle times, the human-in-the-loop queue, and blocking questions aging.
       </p>
@@ -351,7 +351,7 @@ function QualityView() {
   const p = d.test_pyramid;
   return (
     <div>
-      <h2 className="mb-1 text-sm font-semibold text-ink">Quality — is it proven?</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Quality — is it proven?</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
         Live. Traceability integrity (the real RTM), pyramid shape, first-time-right per
         agent, and the flake index.
@@ -437,7 +437,7 @@ function WorklistView() {
   };
   return (
     <div>
-      <h2 className="mb-1 text-sm font-semibold text-ink">Worklist — what do I fix?</h2>
+      <h2 className="mb-1 font-serif text-base font-semibold italic text-ink">Worklist — what do I fix?</h2>
       <p className="mb-3 text-[11px] text-ink-dim">
         Live. Every finding across the story's latest runs, strongest first.
       </p>
