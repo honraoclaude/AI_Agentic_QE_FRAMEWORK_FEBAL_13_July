@@ -131,8 +131,107 @@ export function InsightsView({ actor }: { actor: string }) {
         </div>
       )}
 
+      <EvalScorecardSection />
       <OperationalHealth />
       <FlakyIntel actor={actor} />
+    </div>
+  );
+}
+
+/** Eval Scorecard — the golden-dataset harness, live. Every agent with a
+ *  golden file, graded now against the demo path. This is the regression
+ *  gate: red here means a code change broke a verified, expert-confirmed
+ *  expectation. Green means "measured", not "trust me". */
+function EvalScorecardSection() {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const q = useQuery({
+    queryKey: ["eval-scorecard"],
+    queryFn: () => api.evalScorecard(),
+  });
+  const data = q.data;
+  if (!data) return null;
+  const s = data.summary;
+
+  return (
+    <div className="mb-8">
+      <h2 className="mb-1 text-sm font-semibold text-ink">Eval Scorecard</h2>
+      <p className="mb-4 text-[11px] text-ink-dim">
+        The golden-dataset harness, graded live against the demo path — expert-labelled
+        cases, not vibes. Demo-path only today (regression gate for the fixture
+        generator); a live-model runner against real Claude is a separate follow-up.
+      </p>
+
+      <div className="mb-4 grid grid-cols-4 gap-3">
+        {[
+          ["Agent coverage", `${s.agents_with_golden_data}/${s.agents_total} (${s.coverage_percent}%)`],
+          ["Total cases", String(s.total_cases)],
+          ["Passed", String(s.total_passed)],
+          ["Failed", String(s.total_failed)],
+        ].map(([label, val]) => (
+          <div key={label} className="rounded-lg border border-line bg-panel p-3">
+            <div className={`text-lg font-bold ${label === "Failed" && s.total_failed > 0 ? "text-bad" : "text-ink"}`}>
+              {val}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {data.agents.length === 0 ? (
+        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+          No golden datasets yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-panel">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
+                <th className="px-3 py-2 font-medium">Agent</th>
+                <th className="px-3 py-2 font-medium">Cases</th>
+                <th className="px-3 py-2 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.agents.map((a) => (
+                <>
+                  <tr key={a.agent_key} className="border-b border-line/50 align-top">
+                    <td className="px-3 py-2 text-ink">{a.agent_name}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-ink-dim">{a.cases}</td>
+                    <td className="px-3 py-2">
+                      {a.failed === 0 ? (
+                        <span className="font-mono text-[11px] text-ok">✓ {a.passed}/{a.cases}</span>
+                      ) : (
+                        <button
+                          className="font-mono text-[11px] text-bad hover:underline"
+                          onClick={() => setExpanded(expanded === a.agent_key ? null : a.agent_key)}
+                        >
+                          ✗ {a.passed}/{a.cases} — {expanded === a.agent_key ? "hide" : "show"} failures
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {expanded === a.agent_key && a.failing_cases.map((fc, i) => (
+                    <tr key={`${a.agent_key}-fail-${i}`} className="border-b border-line/50 bg-bad/5">
+                      <td colSpan={3} className="px-3 py-2 text-[11px]">
+                        <span className="font-mono text-bad">{fc.case}</span>
+                        <ul className="ml-3 mt-1 list-inside list-disc text-ink-dim">
+                          {fc.failing_checks.map((c, j) => (
+                            <li key={j}>
+                              <span className="font-mono text-[10px]">{c.path}</span>: expected{" "}
+                              <span className="text-ink">{JSON.stringify(c.expected)}</span>, got{" "}
+                              <span className="text-bad">{JSON.stringify(c.actual)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

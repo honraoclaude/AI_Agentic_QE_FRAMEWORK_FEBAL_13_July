@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from ..services import agent_health, feedback, flaky_intel
+from ..services import agent_health, evals, feedback, flaky_intel
 from .deps import get_session
 
 router = APIRouter(prefix="/insights", tags=["insights"])
@@ -38,6 +38,14 @@ async def operational_health(session: AsyncSession = Depends(get_session)):
     token spend, per-prompt-version reliability, and threshold alerts.
     Deterministic aggregation — no model calls."""
     return await agent_health.compute(session)
+
+
+@router.get("/eval-scorecard")
+async def eval_scorecard():
+    """The golden-dataset eval harness, live: every agent with a golden file,
+    graded now against the demo path — pass/fail counts and any failing
+    checks. No DB — pure computation over backend/evals/golden/*.json."""
+    return evals.scorecard()
 
 
 @router.get("/flaky-tests")

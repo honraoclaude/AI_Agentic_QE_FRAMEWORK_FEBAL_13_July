@@ -6,6 +6,7 @@ import type {
   ConnectorStatus,
   ArtifactKind,
   AuditEvent,
+  EvalScorecard,
   FlakyLedger,
   FlakySig,
   Gate,
@@ -86,6 +87,7 @@ export const api = {
   qualityReport: () => request<QualityReport>("/reports/quality"),
   worklist: (storyId: string) => request<Worklist>(`/reports/worklist/${storyId}`),
 
+  evalScorecard: () => request<EvalScorecard>("/insights/eval-scorecard"),
   flakyTests: () => request<FlakyLedger>("/insights/flaky-tests"),
   quarantineFlaky: (id: string, actor: string, owner: string, expiry_days: number, note: string) =>
     post<FlakySig>(`/insights/flaky-tests/${id}/quarantine`, { actor, owner, expiry_days, note }),

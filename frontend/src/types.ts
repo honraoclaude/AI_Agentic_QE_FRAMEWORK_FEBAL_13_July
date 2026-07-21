@@ -503,6 +503,28 @@ export interface Worklist {
   counts: Record<string, number>;
 }
 
+export interface EvalScorecard {
+  agents: {
+    agent_key: string;
+    agent_name: string;
+    cases: number;
+    passed: number;
+    failed: number;
+    failing_cases: {
+      case: string;
+      failing_checks: { path: string; expected: unknown; actual: unknown; passed: boolean }[];
+    }[];
+  }[];
+  summary: {
+    agents_with_golden_data: number;
+    agents_total: number;
+    coverage_percent: number;
+    total_cases: number;
+    total_passed: number;
+    total_failed: number;
+  };
+}
+
 export interface Artifact {
   id: string;
   story_id: string;

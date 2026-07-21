@@ -141,3 +141,42 @@ def available_agents() -> list[str]:
     if not GOLDEN_DIR.exists():
         return []
     return sorted(p.stem for p in GOLDEN_DIR.glob("*.json"))
+
+
+def scorecard() -> dict:
+    """The eval harness's own status, live: every agent with a golden file,
+    graded now against the demo path. This IS the regression gate CI would
+    run — surfaced here so it's visible in the running app, not just pytest."""
+    from .agents.registry import AGENTS
+
+    agents = []
+    for key in available_agents():
+        card = run_agent_evals(key)
+        agents.append({
+            "agent_key": key,
+            "agent_name": AGENTS[key].name if key in AGENTS else key,
+            "cases": card["cases"],
+            "passed": card["passed"],
+            "failed": card["failed"],
+            "failing_cases": [
+                {
+                    "case": r["case"],
+                    "failing_checks": [c for c in r["checks"] if not c["passed"]],
+                }
+                for r in card["results"]
+                if not r["passed"]
+            ],
+        })
+    covered = len(agents)
+    total_agents = len(AGENTS)
+    return {
+        "agents": agents,
+        "summary": {
+            "agents_with_golden_data": covered,
+            "agents_total": total_agents,
+            "coverage_percent": round(covered / total_agents * 100, 1) if total_agents else 0.0,
+            "total_cases": sum(a["cases"] for a in agents),
+            "total_passed": sum(a["passed"] for a in agents),
+            "total_failed": sum(a["failed"] for a in agents),
+        },
+    }
