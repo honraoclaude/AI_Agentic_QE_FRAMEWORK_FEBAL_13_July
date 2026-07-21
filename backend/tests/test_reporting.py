@@ -106,3 +106,87 @@ async def test_quality_report_and_worklist(session, adapter):
 
     ranks = [severity_rank(i["severity"]) for i in wl["items"]]
     assert ranks == sorted(ranks, reverse=True)
+
+
+async def test_sla_breach_report_flags_over_threshold(session, adapter):
+    stories = await _seed(session, adapter)
+    s = stories[0]
+    await _run_one(session, s)  # leaves the next agent AWAITING_APPROVAL
+
+    # A threshold below zero guarantees a breach regardless of elapsed time.
+    forced = await reporting.sla_breach_report(session, {"REFINEMENT": -1})
+    assert forced["summary"]["total"] >= 1
+    assert any(b["phase"] == "REFINEMENT" for b in forced["breaches"])
+    assert forced["thresholds"]["REFINEMENT"] == -1
+    assert all(b["over_by_days"] >= 0 for b in forced["breaches"])
+
+    # Unconfigured phases fall back to the module defaults.
+    default = await reporting.sla_breach_report(session)
+    assert default["thresholds"]["RELEASE"] == reporting.DEFAULT_SLA_DAYS["RELEASE"]
+    # A generous threshold clears the queue.
+    clear = await reporting.sla_breach_report(session, {"REFINEMENT": 999})
+    assert not any(b["phase"] == "REFINEMENT" for b in clear["breaches"])
+
+
+async def test_readiness_report_scope_risk_and_sort(session, adapter):
+    stories = await _seed(session, adapter)
+    at_risk, healthy = stories[0], stories[1]
+    release = Release(
+        name="Release RD", target_date="2099-01-01",
+        story_ids=[at_risk.id, healthy.id],
+    )
+    session.add(release)
+    await session.flush()
+    # Accepting a WARN verdict opens a risk-register entry (same as the exec
+    # MI test) — that's what should push this story's scope_risk up.
+    await _run_one(session, at_risk)
+
+    report = await reporting.readiness_report(session)
+    assert report["summary"]["total"] == len(stories)
+    row = next(r for r in report["stories"] if r["jira_key"] == at_risk.jira_key)
+    assert row["target_date"] == "2099-01-01"
+    assert row["days_to_target"] is not None and row["days_to_target"] > 0
+    assert row["open_risks"] >= 1
+    assert row["scope_risk"] in ("MEDIUM", "HIGH")
+    # HIGH/MEDIUM risk stories sort before untouched LOW-risk ones.
+    risk_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    ranks = [risk_rank[r["scope_risk"]] for r in report["stories"]]
+    assert ranks == sorted(ranks)
+
+
+async def test_ac_ambiguity_digest_surfaces_blocking_questions(session, adapter):
+    stories = await _seed(session, adapter)
+    s = stories[0]
+    await _run_one(session, s)  # story_quality, upstream of the regulatory chain
+    for key in ("fca_regulatory_impact", "consumer_duty_mapper",
+                "compliance_ac_advisor", "three_amigos"):
+        await _run_one(session, s, key)
+
+    digest = await reporting.ac_ambiguity_digest(session)
+    assert digest["summary"]["stories_with_open_questions"] >= 1
+    row = next(r for r in digest["stories"] if r["jira_key"] == s.jira_key)
+    assert row["blocking"], "three_amigos demo output should include a blocking question"
+
+
+async def test_override_digest_groups_rejections_and_guidance(session, adapter):
+    stories = await _seed(session, adapter)
+    s = stories[0]
+    run = await workflow.latest_run(session, s.id, "story_quality")
+    await workflow.approve_and_run(session, run.id, approver="Test Lead")
+    await workflow.reject_run(
+        session, run.id, actor="Test Lead", reason="Missing AC for refunds"
+    )
+
+    digest = await reporting.override_digest(session)
+    assert digest["summary"]["total_overrides"] >= 1
+    row = next(a for a in digest["agents"] if a["agent_key"] == "story_quality")
+    assert any(
+        i["kind"] == "REJECTED" and "refunds" in i["reason"].lower()
+        for i in row["items"]
+    )
+
+    scoped = await reporting.override_digest(session, assignee=s.assignee)
+    if s.assignee:
+        assert scoped["summary"]["total_overrides"] >= 1
+    else:
+        assert scoped["summary"]["total_overrides"] == 0

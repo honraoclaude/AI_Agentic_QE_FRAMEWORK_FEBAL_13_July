@@ -503,6 +503,72 @@ export interface Worklist {
   counts: Record<string, number>;
 }
 
+export interface SlaBreachReport {
+  generated_at: string;
+  thresholds: Record<string, number>;
+  breaches: {
+    kind: string;
+    jira_key: string;
+    agent: string | null;
+    phase: string;
+    age_days: number;
+    threshold_days: number;
+    over_by_days: number;
+  }[];
+  summary: { total: number; by_phase: Record<string, number> };
+}
+
+export interface ReadinessReport {
+  generated_at: string;
+  stories: {
+    jira_key: string;
+    summary: string;
+    phase: string;
+    score: number | null;
+    band: string;
+    blockers: number;
+    open_risks: number;
+    overdue_risks: number;
+    target_date: string | null;
+    days_to_target: number | null;
+    scope_risk: "LOW" | "MEDIUM" | "HIGH";
+  }[];
+  summary: { total: number; high_risk: number; medium_risk: number };
+}
+
+export interface AcAmbiguityDigest {
+  generated_at: string;
+  stories: {
+    jira_key: string;
+    phase: string;
+    escalate: boolean;
+    blocking: { question: string; owner: string | null }[];
+    non_blocking: { question: string; owner: string | null }[];
+  }[];
+  summary: {
+    stories_with_open_questions: number;
+    stories_blocking: number;
+    escalations: number;
+  };
+}
+
+export interface OverrideDigest {
+  generated_at: string;
+  assignee: string | null;
+  agents: {
+    agent_key: string;
+    agent_name: string;
+    count: number;
+    items: {
+      jira_key: string;
+      kind: "REJECTED" | "RERUN_GUIDANCE";
+      reason: string;
+      decided_at: string | null;
+    }[];
+  }[];
+  summary: { total_overrides: number };
+}
+
 export interface EvalScorecard {
   agents: {
     agent_key: string;

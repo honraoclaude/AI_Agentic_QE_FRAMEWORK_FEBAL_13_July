@@ -20,6 +20,8 @@ All deterministic reads over persisted runs/gates/registers — no model calls.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime
+
 from ..models import (
     AgentRun,
     Gate,
@@ -27,12 +29,20 @@ from ..models import (
     Release,
     ReportSnapshot,
     RunStatus,
+    ScopeStatus,
     Story,
 )
 from ..util import canonical_json, sha256_hex, utcnow
 from . import audit, flaky_intel, referee, risk_register
 from .agents.output_schemas import severity_rank
 from .agents.registry import AGENTS
+
+# Default SLA thresholds (days a HITL item may wait before it's a breach),
+# overridable per phase via Settings > sla. Release is stricter — it's the
+# last checkpoint before a regulated release ships.
+DEFAULT_SLA_DAYS: dict[str, float] = {
+    "REFINEMENT": 2.0, "DEVELOPMENT": 2.0, "TESTING": 2.0, "RELEASE": 1.0,
+}
 
 
 class ReportingError(Exception):
@@ -226,8 +236,10 @@ async def seal_mi_pack(session: AsyncSession, release: Release, actor: str) -> d
 # ------------------------------------------------------------------- flow
 
 
-async def flow_report(session: AsyncSession) -> dict:
-    """PM/PO cut: where is work stuck, who owes what."""
+async def _hitl_queue_items(session: AsyncSession):
+    """Runs/gates currently waiting on a human, with phase + age attached.
+    Shared by Flow (the full queue) and the SLA breach report (the
+    over-threshold subset) so both read the same underlying wait times."""
     runs = await _latest_runs_all(session)
     gates = list((await session.execute(select(Gate))).scalars().all())
     stories = {
@@ -237,6 +249,30 @@ async def flow_report(session: AsyncSession) -> dict:
 
     def _age_days(dt) -> float:
         return round(_days_between(now, dt), 1) if dt else 0.0
+
+    awaiting = [
+        {
+            "kind": "RUN_APPROVAL" if r.status == RunStatus.AWAITING_APPROVAL else "RUN_DECISION",
+            "jira_key": stories[r.story_id].jira_key if r.story_id in stories else "?",
+            "agent": AGENTS[r.agent_key].name if r.agent_key in AGENTS else r.agent_key,
+            "phase": r.phase.value,
+            "age_days": _age_days(r.created_at if r.status == RunStatus.AWAITING_APPROVAL else r.completed_at),
+        }
+        for r in runs
+        if r.status in (RunStatus.AWAITING_APPROVAL, RunStatus.COMPLETED)
+    ]
+    awaiting.sort(key=lambda x: -x["age_days"])
+    ready_gates = [
+        {"jira_key": stories[g.story_id].jira_key if g.story_id in stories else "?",
+         "phase": g.phase.value, "age_days": _age_days(g.created_at)}
+        for g in gates if g.status.value == "READY_FOR_SIGNOFF"
+    ]
+    return awaiting, ready_gates, runs, gates, stories, now
+
+
+async def flow_report(session: AsyncSession) -> dict:
+    """PM/PO cut: where is work stuck, who owes what."""
+    awaiting, ready_gates, runs, gates, stories, now = await _hitl_queue_items(session)
 
     # Gate cycle time per phase (created -> decided).
     cycle: dict[str, list[float]] = {}
@@ -248,24 +284,6 @@ async def flow_report(session: AsyncSession) -> dict:
     gate_cycle = [
         {"phase": p, "avg_days": round(sum(v) / len(v), 1), "gates": len(v)}
         for p, v in cycle.items()
-    ]
-
-    # HITL queue: what awaits a human right now, and for how long.
-    awaiting = [
-        {
-            "kind": "RUN_APPROVAL" if r.status == RunStatus.AWAITING_APPROVAL else "RUN_DECISION",
-            "jira_key": stories[r.story_id].jira_key if r.story_id in stories else "?",
-            "agent": AGENTS[r.agent_key].name if r.agent_key in AGENTS else r.agent_key,
-            "age_days": _age_days(r.created_at if r.status == RunStatus.AWAITING_APPROVAL else r.completed_at),
-        }
-        for r in runs
-        if r.status in (RunStatus.AWAITING_APPROVAL, RunStatus.COMPLETED)
-    ]
-    awaiting.sort(key=lambda x: -x["age_days"])
-    ready_gates = [
-        {"jira_key": stories[g.story_id].jira_key if g.story_id in stories else "?",
-         "phase": g.phase.value, "age_days": _age_days(g.created_at)}
-        for g in gates if g.status.value == "READY_FOR_SIGNOFF"
     ]
 
     # Decision latency: completed -> decided, per role-relevant measure.
@@ -287,7 +305,7 @@ async def flow_report(session: AsyncSession) -> dict:
                     "jira_key": stories[sid].jira_key if sid in stories else "?",
                     "question": str(q.get("question"))[:140],
                     "owner": q.get("owner_persona"),
-                    "age_days": _age_days(r.completed_at),
+                    "age_days": round(_days_between(now, r.completed_at), 1) if r.completed_at else 0.0,
                 })
 
     return {
@@ -301,6 +319,223 @@ async def flow_report(session: AsyncSession) -> dict:
             if latencies else None,
         },
         "blocking_questions": blocking_qs,
+    }
+
+
+# ------------------------------------------------------------- sla breaches
+
+
+async def sla_breach_report(session: AsyncSession, thresholds: dict | None = None) -> dict:
+    """PM cut: HITL items past their phase's SLA threshold — the standup
+    escalation list, not the full queue. Thresholds are configurable per
+    phase (Settings > sla); unset phases fall back to DEFAULT_SLA_DAYS."""
+    th = {**DEFAULT_SLA_DAYS, **(thresholds or {})}
+    awaiting, ready_gates, *_ = await _hitl_queue_items(session)
+
+    breaches = []
+    for item in awaiting:
+        limit = th.get(item["phase"], DEFAULT_SLA_DAYS.get(item["phase"], 2.0))
+        if item["age_days"] > limit:
+            breaches.append({
+                **item, "threshold_days": limit,
+                "over_by_days": round(item["age_days"] - limit, 1),
+            })
+    for g in ready_gates:
+        limit = th.get(g["phase"], DEFAULT_SLA_DAYS.get(g["phase"], 2.0))
+        if g["age_days"] > limit:
+            breaches.append({
+                "kind": "GATE_SIGNOFF", "jira_key": g["jira_key"], "agent": None,
+                "phase": g["phase"], "age_days": g["age_days"],
+                "threshold_days": limit, "over_by_days": round(g["age_days"] - limit, 1),
+            })
+    breaches.sort(key=lambda x: -x["over_by_days"])
+
+    by_phase: dict[str, int] = {}
+    for b in breaches:
+        by_phase[b["phase"]] = by_phase.get(b["phase"], 0) + 1
+
+    return {
+        "generated_at": utcnow().isoformat(),
+        "thresholds": th,
+        "breaches": breaches,
+        "summary": {"total": len(breaches), "by_phase": by_phase},
+    }
+
+
+# -------------------------------------------------------- release readiness
+
+
+async def readiness_report(session: AsyncSession) -> dict:
+    """PO cut: per-story readiness/scope-risk across all active, unreleased
+    stories — live, not scoped to a single release. Decision: what to
+    descope now, while there's still time to react, not at the release gate."""
+    stories = [
+        s for s in (await session.execute(select(Story))).scalars().all()
+        if s.scope_status == ScopeStatus.ACTIVE and not s.released
+    ]
+    releases = list((await session.execute(select(Release))).scalars().all())
+    target_date: dict[str, str] = {}
+    for rel in releases:
+        if not rel.target_date:
+            continue
+        for sid in rel.story_ids or []:
+            if sid not in target_date or rel.target_date < target_date[sid]:
+                target_date[sid] = rel.target_date
+
+    now = utcnow()
+    rows = []
+    for s in stories:
+        health = await referee.assess(session, s.id)
+        reg = await risk_register.list_register(session, s.id)
+        td = target_date.get(s.id)
+        days_to_target = None
+        if td:
+            try:
+                days_to_target = round(_days_between(datetime.fromisoformat(td), now), 1)
+            except ValueError:
+                days_to_target = None
+
+        band = health["band"]
+        open_risk = reg["summary"]["open"]
+        overdue_risk = reg["summary"]["overdue"]
+        if band in ("CRITICAL", "BLOCKED") or overdue_risk:
+            scope_risk = "HIGH"
+        elif band == "AT_RISK" or open_risk:
+            scope_risk = "MEDIUM"
+        else:
+            scope_risk = "LOW"
+
+        rows.append({
+            "jira_key": s.jira_key,
+            "summary": s.summary[:100],
+            "phase": s.current_phase.value,
+            "score": health["score"],
+            "band": band,
+            "blockers": len(health["blockers"]),
+            "open_risks": open_risk,
+            "overdue_risks": overdue_risk,
+            "target_date": td,
+            "days_to_target": days_to_target,
+            "scope_risk": scope_risk,
+        })
+
+    risk_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    rows.sort(key=lambda r: (
+        risk_rank[r["scope_risk"]],
+        r["days_to_target"] if r["days_to_target"] is not None else 9999,
+    ))
+
+    return {
+        "generated_at": now.isoformat(),
+        "stories": rows,
+        "summary": {
+            "total": len(rows),
+            "high_risk": sum(1 for r in rows if r["scope_risk"] == "HIGH"),
+            "medium_risk": sum(1 for r in rows if r["scope_risk"] == "MEDIUM"),
+        },
+    }
+
+
+# ------------------------------------------------------------ ac ambiguity
+
+
+async def ac_ambiguity_digest(session: AsyncSession) -> dict:
+    """BA/QA cut: unresolved Three Amigos open questions, grouped by story —
+    blocking and stories that moved past Refinement while still unresolved
+    first. Decision: what to clarify with the PO before dev starts, not
+    after — that's the expensive kind of rework."""
+    runs = await _latest_runs_all(session)
+    stories = {
+        s.id: s for s in (await session.execute(select(Story))).scalars().all()
+    }
+    latest = _latest_per_story_agent(runs)
+
+    rows = []
+    for (sid, agent_key), r in latest.items():
+        if agent_key != "three_amigos" or not r.output_json:
+            continue
+        questions = r.output_json.get("open_questions") or []
+        if not questions:
+            continue
+        s = stories.get(sid)
+        if s is None:
+            continue
+        blocking = [q for q in questions if isinstance(q, dict) and q.get("blocking")]
+        non_blocking = [q for q in questions if isinstance(q, dict) and not q.get("blocking")]
+        escalate = s.current_phase != Phase.REFINEMENT and bool(blocking)
+        rows.append({
+            "jira_key": s.jira_key,
+            "phase": s.current_phase.value,
+            "escalate": escalate,
+            "blocking": [
+                {"question": str(q.get("question"))[:200], "owner": q.get("owner_persona")}
+                for q in blocking
+            ],
+            "non_blocking": [
+                {"question": str(q.get("question"))[:200], "owner": q.get("owner_persona")}
+                for q in non_blocking
+            ],
+        })
+    rows.sort(key=lambda r: (not r["escalate"], -len(r["blocking"])))
+
+    return {
+        "generated_at": utcnow().isoformat(),
+        "stories": rows,
+        "summary": {
+            "stories_with_open_questions": len(rows),
+            "stories_blocking": sum(1 for r in rows if r["blocking"]),
+            "escalations": sum(1 for r in rows if r["escalate"]),
+        },
+    }
+
+
+# ----------------------------------------------------------- override digest
+
+
+async def override_digest(session: AsyncSession, assignee: str | None = None) -> dict:
+    """Dev cut: why agent output on my stories got overridden — rejection
+    reasons and re-run guidance, grouped by agent, newest first. Decision:
+    how to brief the agent (or fix the underlying code) so the same
+    override doesn't repeat next attempt."""
+    stories = {
+        s.id: s for s in (await session.execute(select(Story))).scalars().all()
+    }
+    story_ids = (
+        {sid for sid, s in stories.items() if s.assignee == assignee}
+        if assignee else set(stories.keys())
+    )
+    runs = [r for r in await _latest_runs_all(session) if r.story_id in story_ids]
+
+    by_agent: dict[str, list[dict]] = {}
+    for r in runs:
+        jira_key = stories[r.story_id].jira_key if r.story_id in stories else "?"
+        if r.status == RunStatus.REJECTED and r.decision_reason:
+            by_agent.setdefault(r.agent_key, []).append({
+                "jira_key": jira_key, "kind": "REJECTED", "reason": r.decision_reason,
+                "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+            })
+        if r.parent_run_id and r.guidance:
+            by_agent.setdefault(r.agent_key, []).append({
+                "jira_key": jira_key, "kind": "RERUN_GUIDANCE", "reason": r.guidance,
+                "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+            })
+
+    agents = []
+    for key, items in by_agent.items():
+        items.sort(key=lambda x: x["decided_at"] or "", reverse=True)
+        agents.append({
+            "agent_key": key,
+            "agent_name": AGENTS[key].name if key in AGENTS else key,
+            "count": len(items),
+            "items": items[:10],
+        })
+    agents.sort(key=lambda a: -a["count"])
+
+    return {
+        "generated_at": utcnow().isoformat(),
+        "assignee": assignee,
+        "agents": agents,
+        "summary": {"total_overrides": sum(a["count"] for a in agents)},
     }
 
 

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Release, ReportSnapshot, Story
-from ..services import reporting
+from ..services import reporting, settings_service
 from .deps import get_session
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -147,3 +147,34 @@ async def story_worklist(story_id: str, session: AsyncSession = Depends(get_sess
     if await session.get(Story, story_id) is None:
         raise HTTPException(status_code=404, detail="story not found")
     return await reporting.worklist(session, story_id)
+
+
+@router.get("/sla-breaches")
+async def sla_breaches(session: AsyncSession = Depends(get_session)):
+    """PM: HITL items past their phase's SLA threshold — the escalation
+    list for standup, not the full queue. Thresholds configurable in
+    Settings > sla."""
+    settings = await settings_service.get_all(session)
+    return await reporting.sla_breach_report(session, settings.get("sla"))
+
+
+@router.get("/readiness")
+async def readiness(session: AsyncSession = Depends(get_session)):
+    """PO: release readiness / scope-risk across all active, unreleased
+    stories — live, not scoped to a single release."""
+    return await reporting.readiness_report(session)
+
+
+@router.get("/ac-ambiguity")
+async def ac_ambiguity(session: AsyncSession = Depends(get_session)):
+    """BA/QA: unresolved Three Amigos open questions, grouped by story."""
+    return await reporting.ac_ambiguity_digest(session)
+
+
+@router.get("/overrides")
+async def overrides(
+    assignee: str | None = None, session: AsyncSession = Depends(get_session)
+):
+    """Dev: why agent output got overridden — rejection reasons and re-run
+    guidance, grouped by agent. Optionally filtered to one assignee's stories."""
+    return await reporting.override_digest(session, assignee)

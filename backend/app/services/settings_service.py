@@ -36,6 +36,9 @@ DEFAULT_SETTINGS: dict = {
         "RELEASE": {**_default_gate("qe-gate-4-passed"), "attach_evidence": True},
     },
     "sync": {"enabled": False, "interval_minutes": 15},
+    # Per-phase SLA thresholds (days) for the Flow report's breach alert —
+    # Release is stricter by default (last checkpoint before ship).
+    "sla": {"REFINEMENT": 2, "DEVELOPMENT": 2, "TESTING": 2, "RELEASE": 1},
     # Agents disabled by the org's process are auto-skipped. Blocking-capable
     # agents (FCA / financial integrity) can never be disabled — the non-override
     # non-negotiable — enforced in update_settings.
