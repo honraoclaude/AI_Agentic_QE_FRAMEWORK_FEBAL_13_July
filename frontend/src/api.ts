@@ -16,6 +16,7 @@ import type {
   OpHealth,
   OverrideDigest,
   PipelineView,
+  PortfolioTrend,
   PushItem,
   QualityReport,
   ReadinessReport,
@@ -87,6 +88,7 @@ export const api = {
   miPreview: (id: string) => request<MiPack>(`/reports/releases/${id}/mi-preview`),
   sealMi: (id: string, actor: string) =>
     post<{ snapshot_id: string; payload_hash: string }>(`/reports/releases/${id}/seal-mi`, { actor }),
+  portfolioTrend: () => request<PortfolioTrend>("/reports/portfolio-trend"),
   flowReport: () => request<FlowReport>("/reports/flow"),
   qualityReport: () => request<QualityReport>("/reports/quality"),
   worklist: (storyId: string) => request<Worklist>(`/reports/worklist/${storyId}`),

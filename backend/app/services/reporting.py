@@ -233,6 +233,81 @@ async def seal_mi_pack(session: AsyncSession, release: Release, actor: str) -> d
     }
 
 
+# --------------------------------------------------------------- portfolio
+
+
+def _trend_direction(values: list, higher_is_better: bool) -> str:
+    vals = [v for v in values if v is not None]
+    if len(vals) < 2:
+        return "INSUFFICIENT_DATA"
+    delta = vals[-1] - vals[0]
+    if abs(delta) < 1e-9:
+        return "FLAT"
+    improving = delta > 0 if higher_is_better else delta < 0
+    return "IMPROVING" if improving else "DEGRADING"
+
+
+async def portfolio_trend(session: AsyncSession) -> dict:
+    """Senior Manager cut: Confidence Index and quality-debt position across
+    every SEALED release, oldest first. Decision: is the trajectory
+    improving or structurally degrading — a single release snapshot can't
+    answer that, only a trend can. Fewer than two sealed releases is
+    reported as insufficient data, never guessed at."""
+    snaps = list((
+        await session.execute(
+            select(ReportSnapshot)
+            .where(ReportSnapshot.kind == "EXEC_MI")
+            .order_by(ReportSnapshot.created_at)
+        )
+    ).scalars().all())
+    releases = {
+        r.id: r for r in (await session.execute(select(Release))).scalars().all()
+    }
+
+    points = []
+    for snap in snaps:
+        p = snap.payload or {}
+        rel = releases.get(snap.release_id)
+        qd, ai, re_, fl = (
+            p.get("quality_debt") or {}, p.get("ai_governance") or {},
+            p.get("regulatory_evidence") or {}, p.get("flow") or {},
+        )
+        points.append({
+            "snapshot_id": snap.id,
+            "release_name": (p.get("release") or {}).get("name") or (rel.name if rel else "?"),
+            "release_id": snap.release_id,
+            "sealed_at": snap.created_at.isoformat() if snap.created_at else None,
+            "confidence_index": p.get("confidence_index"),
+            "quality_debt_open": qd.get("open"),
+            "quality_debt_overdue": qd.get("overdue"),
+            "override_rate": ai.get("override_rate"),
+            "human_decided_pct": ai.get("human_decided_pct"),
+            "first_time_right_rate": ai.get("first_time_right_rate"),
+            "fca_scenarios_unexecuted": re_.get("fca_scenarios_unexecuted"),
+            "avg_lead_time_days": fl.get("avg_lead_time_days"),
+            "rework_story_rate": fl.get("rework_story_rate"),
+        })
+
+    trend = {
+        "confidence_index": _trend_direction(
+            [pt["confidence_index"] for pt in points], higher_is_better=True),
+        "quality_debt_open": _trend_direction(
+            [pt["quality_debt_open"] for pt in points], higher_is_better=False),
+        "override_rate": _trend_direction(
+            [pt["override_rate"] for pt in points], higher_is_better=False),
+    }
+
+    return {
+        "generated_at": utcnow().isoformat(),
+        "points": points,
+        "trend": trend,
+        "summary": {
+            "sealed_releases": len(points),
+            "sufficient_for_trend": len(points) >= 2,
+        },
+    }
+
+
 # ------------------------------------------------------------------- flow
 
 

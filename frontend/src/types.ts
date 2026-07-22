@@ -503,6 +503,31 @@ export interface Worklist {
   counts: Record<string, number>;
 }
 
+export interface PortfolioTrend {
+  generated_at: string;
+  points: {
+    snapshot_id: string;
+    release_name: string;
+    release_id: string;
+    sealed_at: string | null;
+    confidence_index: number | null;
+    quality_debt_open: number | null;
+    quality_debt_overdue: number | null;
+    override_rate: number | null;
+    human_decided_pct: number | null;
+    first_time_right_rate: number | null;
+    fca_scenarios_unexecuted: number | null;
+    avg_lead_time_days: number | null;
+    rework_story_rate: number | null;
+  }[];
+  trend: {
+    confidence_index: "IMPROVING" | "DEGRADING" | "FLAT" | "INSUFFICIENT_DATA";
+    quality_debt_open: "IMPROVING" | "DEGRADING" | "FLAT" | "INSUFFICIENT_DATA";
+    override_rate: "IMPROVING" | "DEGRADING" | "FLAT" | "INSUFFICIENT_DATA";
+  };
+  summary: { sealed_releases: number; sufficient_for_trend: boolean };
+}
+
 export interface SlaBreachReport {
   generated_at: string;
   thresholds: Record<string, number>;

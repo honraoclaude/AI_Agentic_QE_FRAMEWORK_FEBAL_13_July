@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
-import type { MiPack, ReleaseSummary } from "../types";
+import type { MiPack, PortfolioTrend, ReleaseSummary } from "../types";
 import { Badge, Button, useToast } from "../ui";
 
 /** Stakeholder reporting — a report serves one decision, not one audience.
@@ -48,6 +48,33 @@ export function ReportsView({ actor }: { actor: string }) {
 // ---------------------------------------------------------------- Exec MI
 
 function ExecMi({ actor }: { actor: string }) {
+  const [inner, setInner] = useState<"releases" | "trend">("releases");
+  return (
+    <div>
+      <h2 className="mb-1 text-sm font-semibold text-ink">Executive MI — per release, sealed</h2>
+      <p className="mb-3 text-[11px] text-ink-dim">
+        Board-ready Consumer-Duty-style MI, per release (sealed + hash-chained), and the
+        portfolio trend across every sealed release (Senior Manager).
+      </p>
+      <div className="mb-4 flex gap-1">
+        {(
+          [
+            ["releases", "Releases"],
+            ["trend", "Portfolio trend"],
+          ] as [typeof inner, string][]
+        ).map(([id, label]) => (
+          <button key={id} onClick={() => setInner(id)} className={innerTabCls(inner === id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {inner === "releases" && <ExecReleasesPanel actor={actor} />}
+      {inner === "trend" && <PortfolioTrendPanel />}
+    </div>
+  );
+}
+
+function ExecReleasesPanel({ actor }: { actor: string }) {
   const [name, setName] = useState("");
   const [date, setDate] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -81,11 +108,9 @@ function ExecMi({ actor }: { actor: string }) {
 
   return (
     <div>
-      <h2 className="mb-1 text-sm font-semibold text-ink">Executive MI — per release, sealed</h2>
       <p className="mb-4 text-[11px] text-ink-dim">
-        Board-ready Consumer-Duty-style MI. A sealed pack is immutable: its canonical
-        hash enters the append-only audit chain, so "the numbers the board saw" stay
-        reproducible. Live previews are clearly unsealed.
+        A sealed pack is immutable: its canonical hash enters the append-only audit chain, so
+        "the numbers the board saw" stay reproducible. Live previews are clearly unsealed.
       </p>
 
       {/* Create release */}
@@ -255,6 +280,96 @@ function MiPreview({ pack, onClose }: { pack: MiPack; onClose: () => void }) {
         Lead time {pack.flow.avg_lead_time_days ?? "—"}d · rework rate {pct(pack.flow.rework_story_rate)} ·
         override rate {pct(pack.ai_governance.override_rate)} · first-time-right {pct(pack.ai_governance.first_time_right_rate)}
       </div>
+    </div>
+  );
+}
+
+function PortfolioTrendPanel() {
+  const q = useQuery({ queryKey: ["portfolio-trend"], queryFn: () => api.portfolioTrend() });
+  const d = q.data;
+  if (!d) return <div className="text-sm text-ink-faint">Loading…</div>;
+
+  const DIR_CLS: Record<PortfolioTrend["trend"]["confidence_index"], string> = {
+    IMPROVING: "text-ok",
+    DEGRADING: "text-bad",
+    FLAT: "text-ink-dim",
+    INSUFFICIENT_DATA: "text-ink-faint",
+  };
+  const DIR_LABEL: Record<PortfolioTrend["trend"]["confidence_index"], string> = {
+    IMPROVING: "↑ improving",
+    DEGRADING: "↓ degrading",
+    FLAT: "→ flat",
+    INSUFFICIENT_DATA: "— not enough data",
+  };
+
+  return (
+    <div>
+      <p className="mb-3 text-[11px] text-ink-dim">
+        Confidence Index and quality-debt position across every sealed release, oldest first
+        — is the trajectory improving or degrading structurally, not what one release looked
+        like.
+      </p>
+      {!d.summary.sufficient_for_trend && (
+        <div className="mb-3 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+          Only {d.summary.sealed_releases} sealed release{d.summary.sealed_releases === 1 ? "" : "s"} so
+          far — seal another release's MI pack to start seeing a trend.
+        </div>
+      )}
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        {(
+          [
+            ["Confidence Index", d.trend.confidence_index],
+            ["Quality debt (open)", d.trend.quality_debt_open],
+            ["Override rate", d.trend.override_rate],
+          ] as [string, PortfolioTrend["trend"]["confidence_index"]][]
+        ).map(([label, dir]) => (
+          <div key={label} className="rounded-lg border border-line bg-panel p-3">
+            <div className={`text-sm font-bold ${DIR_CLS[dir]}`}>{DIR_LABEL[dir]}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+          </div>
+        ))}
+      </div>
+      {d.points.length === 0 ? (
+        <div className="rounded-lg border border-line bg-panel p-6 text-center text-sm text-ink-faint">
+          No sealed releases yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-panel">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-line text-[10px] uppercase tracking-wider text-ink-faint">
+                <th className="px-3 py-2">Release</th><th className="px-3 py-2">Sealed</th>
+                <th className="px-3 py-2">Confidence</th><th className="px-3 py-2">Debt (overdue)</th>
+                <th className="px-3 py-2">Override</th><th className="px-3 py-2">Human-decided</th>
+                <th className="px-3 py-2">FTR</th><th className="px-3 py-2">FCA unexecuted</th>
+                <th className="px-3 py-2">Lead time</th><th className="px-3 py-2">Rework</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.points.map((p) => (
+                <tr key={p.snapshot_id} className="border-b border-line/50">
+                  <td className="px-3 py-1.5 font-medium text-ink">{p.release_name}</td>
+                  <td className="px-3 py-1.5 font-mono text-[10px] text-ink-faint">
+                    {(p.sealed_at ?? "").slice(0, 10)}
+                  </td>
+                  <td className="px-3 py-1.5">{p.confidence_index ?? "—"}</td>
+                  <td className={`px-3 py-1.5 ${p.quality_debt_overdue ? "text-bad" : ""}`}>
+                    {p.quality_debt_open ?? "—"} ({p.quality_debt_overdue ?? "—"})
+                  </td>
+                  <td className="px-3 py-1.5">{pct(p.override_rate)}</td>
+                  <td className="px-3 py-1.5">{pct(p.human_decided_pct)}</td>
+                  <td className="px-3 py-1.5">{pct(p.first_time_right_rate)}</td>
+                  <td className={`px-3 py-1.5 ${p.fca_scenarios_unexecuted ? "text-bad" : ""}`}>
+                    {p.fca_scenarios_unexecuted ?? "—"}
+                  </td>
+                  <td className="px-3 py-1.5">{p.avg_lead_time_days ?? "—"}</td>
+                  <td className="px-3 py-1.5">{pct(p.rework_story_rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

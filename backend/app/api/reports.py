@@ -129,6 +129,13 @@ async def get_snapshot(
     )
 
 
+@router.get("/portfolio-trend")
+async def portfolio_trend(session: AsyncSession = Depends(get_session)):
+    """Senior Manager: Confidence Index and quality-debt position across
+    every sealed release — is the trajectory improving or degrading."""
+    return await reporting.portfolio_trend(session)
+
+
 @router.get("/flow")
 async def flow(session: AsyncSession = Depends(get_session)):
     """PM/PO: gate cycle times, HITL queue depth/latency, blocking questions."""

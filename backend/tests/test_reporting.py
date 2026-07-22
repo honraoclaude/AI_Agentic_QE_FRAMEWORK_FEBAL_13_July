@@ -108,6 +108,35 @@ async def test_quality_report_and_worklist(session, adapter):
     assert ranks == sorted(ranks, reverse=True)
 
 
+async def test_portfolio_trend_insufficient_then_direction(session, adapter):
+    stories = await _seed(session, adapter)
+    await _run_one(session, stories[0])
+
+    release_a = Release(name="Release A", story_ids=[s.id for s in stories[:2]])
+    session.add(release_a)
+    await session.flush()
+    await reporting.seal_mi_pack(session, release_a, actor="CTO")
+
+    # One sealed release is not enough to call a direction.
+    trend = await reporting.portfolio_trend(session)
+    assert trend["summary"]["sealed_releases"] == 1
+    assert trend["summary"]["sufficient_for_trend"] is False
+    assert trend["trend"]["confidence_index"] == "INSUFFICIENT_DATA"
+
+    # A second sealed release makes a direction computable (not asserting
+    # which way — the fixture data doesn't guarantee movement — just shape).
+    release_b = Release(name="Release B", story_ids=[s.id for s in stories[:2]])
+    session.add(release_b)
+    await session.flush()
+    await reporting.seal_mi_pack(session, release_b, actor="CTO")
+
+    trend = await reporting.portfolio_trend(session)
+    assert trend["summary"]["sealed_releases"] == 2
+    assert trend["summary"]["sufficient_for_trend"] is True
+    assert trend["trend"]["confidence_index"] in ("IMPROVING", "DEGRADING", "FLAT")
+    assert [p["release_name"] for p in trend["points"]] == ["Release A", "Release B"]
+
+
 async def test_sla_breach_report_flags_over_threshold(session, adapter):
     stories = await _seed(session, adapter)
     s = stories[0]
